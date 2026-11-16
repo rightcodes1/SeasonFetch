@@ -39,17 +39,19 @@ export async function getEpisodeSources(seriesId, season, episode) {
   };
 }
 
-export async function getSeasonSources(seriesId, season, episodeCount) {
-  const total = Math.min(Math.max(Number(episodeCount) || 0, 0), 30);
-  const results = new Array(total);
+export async function getSeasonSources(seriesId, season, episodeNumbers) {
+  const requestedEpisodes = Array.isArray(episodeNumbers)
+    ? episodeNumbers.filter(number => Number.isInteger(number) && number > 0).slice(0, 30)
+    : Array.from({ length: Math.min(Math.max(Number(episodeNumbers) || 0, 0), 30) }, (_, index) => index + 1);
+  const results = new Array(requestedEpisodes.length);
   let nextIndex = 0;
 
   async function worker() {
     while (true) {
       const index = nextIndex++;
-      if (index >= total) return;
+      if (index >= requestedEpisodes.length) return;
 
-      const episode = index + 1;
+      const episode = requestedEpisodes[index];
       try {
         results[index] = await getEpisodeSources(seriesId, season, episode);
       } catch (error) {
@@ -64,6 +66,16 @@ export async function getSeasonSources(seriesId, season, episodeCount) {
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(3, total) }, worker));
-  return results;
+  await Promise.all(Array.from({ length: Math.min(3, requestedEpisodes.length) }, worker));
+
+  const providerErrors = results.filter(result => result.status === "error").length;
+  const available = results.filter(result => result.selected).length;
+
+  return {
+    requestedEpisodes,
+    results,
+    available,
+    providerErrors,
+    status: providerErrors === results.length && results.length ? "error" : providerErrors ? "partial" : "live"
+  };
 }

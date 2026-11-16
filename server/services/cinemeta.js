@@ -18,12 +18,21 @@ function normalizeSeries(item = {}) {
     imdbId: item.id,
     title: item.name || "Unknown title",
     year: item.year || null,
-    rating: item.imdbRating || null,
+    rating: item.imdbRating || item.rating || null,
     type: genres.slice(0, 2).join(" · ") || "Series",
     synopsis: item.description || "",
     genres,
     poster: item.poster || null
   };
+}
+
+async function hydrateSearchResult(series) {
+  try {
+    const data = await requestJson(`${BASE_URL}/meta/series/${encodeURIComponent(series.imdbId)}.json`);
+    return data.meta ? { ...series, ...normalizeSeries(data.meta) } : series;
+  } catch {
+    return series;
+  }
 }
 
 export async function searchSeries(query) {
@@ -32,7 +41,11 @@ export async function searchSeries(query) {
 
   const url = `${BASE_URL}/catalog/series/top/search=${encodeURIComponent(cleanQuery)}.json`;
   const data = await requestJson(url);
-  return (data.metas || []).filter(item => item.type === "series" && /^tt\d+$/.test(item.id)).map(normalizeSeries);
+  const results = (data.metas || [])
+    .filter(item => item.type === "series" && /^tt\d+$/.test(item.id))
+    .map(normalizeSeries);
+  const hydrated = await Promise.all(results.slice(0, 8).map(hydrateSearchResult));
+  return [...hydrated, ...results.slice(8)];
 }
 
 function normalizeEpisodes(meta = {}) {

@@ -7,10 +7,11 @@
 - [x] Make search interactive using realistic local sample data, including loading, error, no-results, and initial empty states.
 - [x] Make search result cards selectable and clearly indicate the active selection.
 - [x] Include selected-series details with poster artwork, metadata, synopsis, status, genres, and season information.
+- [x] Render real Cinemeta poster thumbnails and enriched ratings in search result cards, with visible fallbacks when optional metadata is missing.
 - [x] Include a season selector that updates the displayed episode list and progress summary.
 - [x] Include a responsive episode source table with source availability, status, and relevant actions.
 - [x] Make episode rows expandable to reveal source information without leaving the page.
-- [x] Make copy-magnet actions functional with clear success feedback.
+- [x] Make open-magnet, provider-link, and copy-magnet actions functional with clear success feedback.
 - [x] Include a responsive mobile layouts for the compact viewport.
 
 ## Live Cinemeta metadata
@@ -24,11 +25,19 @@
 - [x] Limit season lookups to three concurrent provider requests.
 - [x] Normalize Torrentio responses to valid 40-character info hashes, explicit 1080p sources, normalized file sizes, file indexes, and magnet links.
 - [x] Select the smallest known 1080p source while retaining an unknown-size source only when no known size exists.
+- [x] Preserve safe Torrentio source URLs, file indexes, tracker counts, and file-aware magnet links.
+- [x] Query the actual Cinemeta episode numbers, including sparse or non-contiguous seasons, instead of assuming 1..N.
+- [x] Surface partial and complete Torrentio provider failures distinctly from normal no-source results.
 - [x] Show live Torrentio status in the UI and preserve clearly labeled preview fallback data when the provider is unavailable.
+
+## Production deployment
+- [x] Export the Express app for a Vercel Node function while retaining the local server entrypoint.
+- [x] Add Vercel build and API rewrite configuration for the Vite frontend and provider proxy.
+- [ ] Verify a production deployment serves `/`, `/api/health`, Cinemeta search, and Torrentio source scans.
 
 ## Delivery checks
 - [x] Verify the Vite Preview forwards API requests to the provider proxy.
 - [x] Verify the real Torrentio proxy returns a normalized Breaking Bad source.
 - [x] Verify live Cinemeta search and metadata loading for The Office, including real season options.
-- [x] Verify parser tests and the production frontend build complete successfully.
-- [ ] Configure production deployment routing for the Express server if publishing is requested.
+- [x] Verify parser tests and the production frontend build complete successfully after the provider and deployment changes.
+- [x] Smoke-test the production Express entrypoint, `/api/health`, live Cinemeta search, and a live Torrentio episode scan locally.

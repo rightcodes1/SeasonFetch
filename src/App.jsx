@@ -145,6 +145,7 @@ function Icon({ name, size = 16, strokeWidth = 1.8 }) {
 function Poster({ series, large = false }) {
   return (
     <div className={`poster-art ${series.accent} ${large ? 'poster-art-large' : ''}`} aria-label={`${series.title} poster artwork`}>
+      {series.poster && <img className="poster-image" src={series.poster} alt="" loading={large ? 'eager' : 'lazy'} onError={event => event.currentTarget.remove()} />}
       <div className="poster-noise" />
       <span className="poster-mark">{series.initials}</span>
       <span className="poster-caption">{series.posterLabel}</span>
@@ -157,7 +158,8 @@ function StatusBadge({ status }) {
   const config = {
     selected: { label: 'Selected', icon: 'check' },
     'size-unknown': { label: 'Size unknown', icon: 'dots' },
-    unavailable: { label: 'Unavailable', icon: 'x' }
+    unavailable: { label: 'Unavailable', icon: 'x' },
+    'provider-error': { label: 'Provider error', icon: 'x' }
   }[status] || { label: 'Unavailable', icon: 'x' };
 
   return (
@@ -166,6 +168,15 @@ function StatusBadge({ status }) {
       {config.label}
     </span>
   );
+}
+
+function getEpisodeNumber(row, index) {
+  const number = typeof row?.number === 'number' ? row.number : row?.[5];
+  return Number.isInteger(number) && number > 0 ? number : index + 1;
+}
+
+function getEpisodeTitle(row, number) {
+  return row?.title || row?.[0] || `Episode ${number}`;
 }
 
 function App() {
@@ -182,7 +193,7 @@ function App() {
   const [searchTouched, setSearchTouched] = useState(false);
   const [providerMode, setProviderMode] = useState('ready');
 
-  const available = useMemo(() => episodes.filter(item => item.status !== 'unavailable').length, [episodes]);
+  const available = useMemo(() => episodes.filter(item => !['unavailable', 'provider-error'].includes(item.status)).length, [episodes]);
   const progress = episodes.length ? Math.round((available / episodes.length) * 100) : 0;
 
   function runSearch(event, overrideQuery) {
@@ -234,7 +245,17 @@ function App() {
 
   async function chooseSeries(series) {
     const local = SERIES.find(item => item.imdbId === series.imdbId || item.id === series.id);
-    const baseSeries = { ...local, ...series, imdbId: series.imdbId || series.id, seasons: series.seasons || local?.seasons || 1, episodes: series.episodes || local?.episodes || {} };
+    const baseSeasonCount = Number(series.seasons || local?.seasons || 1);
+    const baseSeries = {
+      ...local,
+      ...series,
+      imdbId: series.imdbId || series.id,
+      seasons: baseSeasonCount,
+      seasonNumbers: Array.isArray(series.seasonNumbers) && series.seasonNumbers.length
+        ? series.seasonNumbers
+        : Array.from({ length: baseSeasonCount }, (_, index) => index + 1),
+      episodes: series.episodes || local?.episodes || {}
+    };
     setSelected(baseSeries);
     setResults([]);
     setNotice(null);
@@ -250,16 +271,19 @@ function App() {
       const remoteEpisodes = Object.fromEntries(
         Object.entries(data.episodes || {}).map(([seasonNumber, list]) => [
           seasonNumber,
-          list.map(item => [item.title, '—', 'unavailable', '', ''])
+          list.map(item => ({ title: item.title, number: item.number, size: '—', status: 'unavailable', format: '', hash: '', magnet: '' }))
         ])
       );
+      const seasonNumbers = Object.keys(remoteEpisodes).map(Number).filter(Number.isInteger).sort((a, b) => a - b);
+      if (seasonNumbers.length && !seasonNumbers.includes(season)) setSeason(seasonNumbers[0]);
       setSelected(current => current ? {
         ...current,
         ...data.series,
         id: current.id,
         imdbId: baseSeries.imdbId,
         episodes: Object.keys(remoteEpisodes).length ? remoteEpisodes : current.episodes,
-        seasons: Math.max(current.seasons || 0, Object.keys(remoteEpisodes).length)
+        seasonNumbers: seasonNumbers.length ? seasonNumbers : current.seasonNumbers,
+        seasons: seasonNumbers.length ? seasonNumbers.length : current.seasons
       } : current);
     } catch (error) {
       console.warn('Cinemeta metadata failed; retaining search result.', error);
@@ -272,48 +296,66 @@ function App() {
     setEpisodes([]);
     setExpanded({});
     setNotice(null);
-    const baseRows = selected.episodes[season] || selected.episodes[1] || [];
+    const baseRows = selected.episodes[season] || [];
+
+    if (!baseRows.length) {
+      setChecking(false);
+      setProviderMode('error');
+      setNotice(`No episode metadata is available for ${season === 0 ? 'Specials' : `Season ${season}`}.`);
+      return;
+    }
+
+    const episodeNumbers = baseRows.map(getEpisodeNumber);
 
     const makeDemoRows = () => baseRows.map((row, index) => ({
       id: `${selected.id}-${season}-${index + 1}`,
-      number: index + 1,
-      title: row[0],
-      size: row[1],
-      status: row[2],
-      format: row[3],
-      hash: row[4],
-      magnet: row[4]
-        ? `magnet:?xt=urn:btih:${row[4]}&dn=${encodeURIComponent(selected.title + ' S' + String(season).padStart(2, '0') + 'E' + String(index + 1).padStart(2, '0'))}`
+      number: episodeNumbers[index],
+      title: getEpisodeTitle(row, episodeNumbers[index]),
+      size: row.size || row[1] || '—',
+      status: row.status || row[2] || 'unavailable',
+      format: row.format || row[3] || '',
+      hash: row.hash || row[4] || '',
+      magnet: (row.hash || row[4])
+        ? `magnet:?xt=urn:btih:${row.hash || row[4]}&dn=${encodeURIComponent(selected.title + ' S' + String(season).padStart(2, '0') + 'E' + String(episodeNumbers[index]).padStart(2, '0'))}`
         : '',
-      sourceCount: row[4] ? 1 : 0,
-      sourceError: ''
+      sourceUrl: '',
+      sourceCount: row.hash || row[4] ? 1 : 0,
+      sourceError: '',
+      candidates: []
     }));
 
     const mapProviderRows = providerResults => baseRows.map((row, index) => {
-      const provider = providerResults.find(item => item.episode === index + 1);
+      const episodeNumber = episodeNumbers[index];
+      const provider = providerResults.find(item => item.episode === episodeNumber);
       const source = provider?.selected;
-      const status = provider?.status === 'error' ? 'unavailable' : (provider?.status || 'unavailable');
+      const status = provider?.status === 'error' ? 'provider-error' : (provider?.status || 'unavailable');
 
       return {
-        id: `${selected.id}-${season}-${index + 1}`,
-        number: index + 1,
-        title: row[0],
+        id: `${selected.id}-${season}-${episodeNumber}`,
+        number: episodeNumber,
+        title: getEpisodeTitle(row, episodeNumber),
         size: source?.sizeLabel || (status === 'unavailable' ? '—' : 'Unknown'),
         status,
         format: source?.title || '',
         hash: source?.infoHash || '',
         magnet: source?.magnet || '',
+        sourceUrl: source?.sourceUrl || source?.externalUrl || '',
+        fileIdx: source?.fileIdx ?? null,
+        trackerCount: source?.trackerCount || 0,
         sourceCount: provider?.sources?.length || 0,
-        sourceError: provider?.error || ''
+        sourceError: provider?.error || '',
+        candidates: provider?.sources || []
       };
     });
 
     window.setTimeout(() => {
-      torrentio.getSeasonSources(selected.imdbId, season, baseRows.length)
+      torrentio.getSeasonSources(selected.imdbId, season, episodeNumbers)
         .then(data => {
           setEpisodes(mapProviderRows(data.results || []));
-          setProviderMode('live');
+          setProviderMode(data.status === 'partial' ? 'partial' : data.status === 'error' ? 'error' : 'live');
           setChecking(false);
+          if (data.status === 'partial') setNotice(`${data.providerErrors} episode source request${data.providerErrors === 1 ? '' : 's'} failed; successful Torrentio results are still shown.`);
+          if (data.status === 'error') setNotice('Torrentio could not answer the episode requests. Try the scan again later.');
           setToast(`Season ${season} Torrentio scan complete`);
           window.setTimeout(() => setToast(''), 2600);
         })
@@ -347,7 +389,7 @@ function App() {
     setProviderMode('ready');
   }
 
-  const seasonOptions = Array.from({ length: selected?.seasons || 0 }, (_, index) => index + 1);
+  const seasonOptions = selected?.seasonNumbers || Array.from({ length: selected?.seasons || 0 }, (_, index) => index + 1);
 
   return (
     <div className="app-shell">
@@ -359,7 +401,7 @@ function App() {
           <span>Season<span className="accent-text">Fetch</span></span>
         </button>
         <div className="topbar-right">
-          <span className="live-indicator"><i /> Preview mode</span>
+          <span className="live-indicator"><i /> Live discovery</span>
           <span className="topbar-label">TV SOURCE DISCOVERY</span>
           <button className="icon-button" aria-label="More options"><Icon name="dots" size={18} /></button>
         </div>
@@ -391,7 +433,7 @@ function App() {
             <div className="series-grid">
               {results.map(series => <button key={series.id} className="series-card" onClick={() => chooseSeries(series)}>
                 <Poster series={series} />
-                <span className="series-card-copy"><strong>{series.title}</strong><span>{series.year} <i /> {series.type}</span><em><Icon name="bolt" size={11} /> {series.rating} rating</em></span>
+                <span className="series-card-copy"><strong>{series.title}</strong><span>{series.year || 'Year unavailable'} <i /> {series.type || 'Series'}</span><em><Icon name="bolt" size={11} /> {series.rating || 'Rating unavailable'}</em></span>
                 <span className="card-arrow"><Icon name="arrow" size={15} /></span>
               </button>)}
             </div>
@@ -413,11 +455,11 @@ function App() {
             <div className="series-banner">
               <Poster series={selected} large />
               <div className="selected-info">
-                <div className="selected-topline"><span className="section-kicker">SELECTED SERIES</span>{providerMode === 'live' ? <span className="synced"><i /> Torrentio live</span> : providerMode === 'demo' ? <span className="synced demo-provider"><Icon name="dots" size={12} /> Preview fallback</span> : <span className="synced"><Icon name="check" size={12} /> Metadata synced</span>}</div>
+                <div className="selected-topline"><span className="section-kicker">SELECTED SERIES</span>{providerMode === 'live' ? <span className="synced"><i /> Torrentio live</span> : providerMode === 'partial' ? <span className="synced partial-provider"><Icon name="dots" size={12} /> Torrentio partial</span> : providerMode === 'error' ? <span className="synced error-provider"><Icon name="x" size={12} /> Provider error</span> : providerMode === 'demo' ? <span className="synced demo-provider"><Icon name="dots" size={12} /> Preview fallback</span> : <span className="synced"><Icon name="check" size={12} /> Metadata synced</span>}</div>
                 <h2>{selected.title}</h2>
                 <div className="selected-meta"><span>{selected.year}</span><i /> <span>{selected.type}</span><i /> <span><Icon name="bolt" size={12} /> {selected.rating}</span></div>
                 <p className="synopsis">{selected.synopsis}</p>
-                <div className="genre-row">{selected.genres.map(genre => <span key={genre}>{genre}</span>)}</div>
+                <div className="genre-row">{(selected.genres || []).map(genre => <span key={genre}>{genre}</span>)}</div>
               </div>
               <button className="change-button" onClick={() => { setSelected(null); setEpisodes([]); setResults(SERIES); }}>Change series <Icon name="arrow" size={14} /></button>
             </div>
@@ -425,7 +467,7 @@ function App() {
             <div className="season-toolbar">
               <div><span className="section-kicker">EPISODE SOURCES</span><h2>Season results</h2></div>
               <div className="season-controls">
-                <div className="select-wrap"><Icon name="filter" size={15} /><select value={season} onChange={event => { setSeason(Number(event.target.value)); setEpisodes([]); setExpanded({}); setProviderMode('ready'); }} aria-label="Choose season">{seasonOptions.map(item => <option key={item} value={item}>Season {item}</option>)}</select><Icon name="down" size={14} /></div>
+                <div className="select-wrap"><Icon name="filter" size={15} /><select value={season} onChange={event => { setSeason(Number(event.target.value)); setEpisodes([]); setExpanded({}); setProviderMode('ready'); }} aria-label="Choose season">{seasonOptions.map(item => <option key={item} value={item}>{item === 0 ? 'Specials' : `Season ${item}`}</option>)}</select><Icon name="down" size={14} /></div>
                 <button className="primary-button" onClick={checkSources} disabled={checking}>{checking ? <><span className="spinner spinner-dark" /> Scanning</> : <><Icon name="refresh" size={15} /> Check sources</>}</button>
               </div>
             </div>
@@ -436,23 +478,23 @@ function App() {
               <div className="summary-panel">
                 <div className="summary-stat"><span className="summary-label">AVAILABLE</span><strong>{available}<small>/{episodes.length}</small></strong></div>
                 <div className="summary-progress"><div className="progress-label"><span>Season coverage</span><b>{progress}%</b></div><div className="progress-track"><i style={{ width: `${progress}%` }} /></div></div>
-                <div className="summary-chip"><span className="chip-dot" /> {providerMode === 'live' ? 'Torrentio live · 1080p only' : providerMode === 'demo' ? 'Preview fallback · 1080p only' : '1080p filter active'}</div>
+                <div className="summary-chip"><span className="chip-dot" /> {providerMode === 'live' ? 'Torrentio live · 1080p only' : providerMode === 'partial' ? 'Torrentio partial · retry failed rows' : providerMode === 'error' ? 'Torrentio error · retry scan' : providerMode === 'demo' ? 'Preview fallback · 1080p only' : '1080p filter active'}</div>
               </div>
               <div className="episode-table">
                 <div className="table-header"><span>EPISODE</span><span>SOURCE</span><span>FILE SIZE</span><span>STATUS</span><span /></div>
                 {episodes.map((item) => <div className="episode-group" key={item.id}>
-                  <div className={`episode-row ${expanded[item.id] ? 'is-expanded' : ''}`}>
-                    <button className="episode-name" onClick={() => setExpanded(current => ({ ...current, [item.id]: !current[item.id] }))}><span className="chevron"><Icon name={expanded[item.id] ? 'down' : 'chevron'} size={15} /></span><span className="episode-number">E{String(item.number).padStart(2, '0')}</span><span className="episode-title">{item.title}</span></button>
-                    <span className={`quality-pill ${item.status === 'unavailable' ? 'muted-pill' : ''}`}>{item.status === 'unavailable' ? '—' : '1080p'}</span>
+                    <div className={`episode-row ${expanded[item.id] ? 'is-expanded' : ''}`}>
+                    <button className="episode-name" onClick={() => setExpanded(current => ({ ...current, [item.id]: !current[item.id] }))}><span className="chevron"><Icon name={expanded[item.id] ? 'down' : 'chevron'} size={15} /></span><span className="episode-number">E{String(item.number).padStart(2, '0')}</span><span className="episode-title">{item.title}</span><span className={`mobile-status ${item.status}`} title={item.status === 'selected' ? 'Selected source' : item.status === 'size-unknown' ? 'Size unknown' : item.status === 'provider-error' ? 'Provider error' : 'Unavailable'}><Icon name={item.status === 'selected' ? 'check' : item.status === 'size-unknown' ? 'dots' : 'x'} size={12} /></span></button>
+                    <span className={`quality-pill ${['unavailable', 'provider-error'].includes(item.status) ? 'muted-pill' : ''}`}>{['unavailable', 'provider-error'].includes(item.status) ? '—' : '1080p'}</span>
                     <span className="file-size">{item.size}</span>
                     <StatusBadge status={item.status} />
                     <span className="row-action">{item.magnet && <button className="copy-button" onClick={() => copyMagnet(item.magnet)} aria-label={`Copy magnet for episode ${item.number}`}><Icon name="copy" size={15} /></button>}</span>
                   </div>
                   {expanded[item.id] && <div className="episode-details">
                     {item.magnet ? <>
-                      <div className="detail-top"><div><span className="detail-label">SELECTED SOURCE</span><strong>{item.format}</strong></div><button className="primary-button small-button" onClick={() => copyMagnet(item.magnet)}><Icon name="copy" size={14} /> Copy magnet</button></div>
-                      <div className="detail-meta"><span><b>Resolution</b>1080p</span><span><b>File size</b>{item.size}</span><span><b>Info hash</b>{item.hash.slice(0, 12)}…</span></div>
-                      <div className="magnet-line"><code>{item.magnet}</code><button onClick={() => copyMagnet(item.magnet)} aria-label="Copy magnet"><Icon name="copy" size={14} /></button></div>
+                      <div className="detail-top"><div><span className="detail-label">SELECTED SOURCE</span><strong>{item.format}</strong></div><div className="detail-actions">{item.sourceUrl && <a className="secondary-button small-button" href={item.sourceUrl} target="_blank" rel="noreferrer">Open source <Icon name="arrow" size={13} /></a>}<a className="primary-button small-button" href={item.magnet}>Open magnet <Icon name="link" size={13} /></a><button className="primary-button small-button" onClick={() => copyMagnet(item.magnet)}><Icon name="copy" size={14} /> Copy magnet</button></div></div>
+                      <div className="detail-meta"><span><b>Resolution</b>1080p</span><span><b>File size</b>{item.size}</span><span><b>Info hash</b>{item.hash.slice(0, 12)}…</span>{item.fileIdx !== null && <span><b>File index</b>{item.fileIdx}</span>}{item.trackerCount > 0 && <span><b>Trackers</b>{item.trackerCount}</span>}</div>
+                      <div className="magnet-line"><code>{item.magnet}</code><a href={item.magnet} aria-label="Open magnet">Open</a><button onClick={() => copyMagnet(item.magnet)} aria-label="Copy magnet"><Icon name="copy" size={14} /></button></div>
                       <p className="detail-note"><Icon name="bolt" size={13} /> {providerMode === 'live' ? 'Normalized from Torrentio and selected by smallest known size.' : 'Preview source selected by smallest known size.'}</p>
                     </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>No valid 1080p source found</strong><span>{item.sourceError || 'Try again later — provider availability can change.'}</span></div></div>}
                   </div>}
@@ -465,7 +507,7 @@ function App() {
         )}
       </main>
 
-      <footer className="footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Metadata: local preview <i /> Sources: Torrentio proxy <i /> Preview build 0.2</span></footer>
+      <footer className="footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Metadata: Cinemeta live <i /> Sources: Torrentio proxy <i /> 1080p normalized</span></footer>
       {toast && <div className="toast"><span className="toast-icon"><Icon name="check" size={14} /></span>{toast}</div>}
     </div>
   );
