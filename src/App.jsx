@@ -397,6 +397,41 @@ function App() {
     window.setTimeout(() => setToast(''), 2400);
   }
 
+  function getSeasonMagnets() {
+    return episodes.filter(item => item.magnet && !item.preview).map(item => item.magnet);
+  }
+
+  function copySeasonMagnets() {
+    const magnets = getSeasonMagnets();
+    if (!magnets.length) {
+      setNotice('No live Torrentio magnets are available for this season yet. Run Check sources first.');
+      return;
+    }
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(magnets.join('\n')).catch(() => {});
+    setToast(`${magnets.length} season magnet${magnets.length === 1 ? '' : 's'} copied`);
+    window.setTimeout(() => setToast(''), 2400);
+  }
+
+  function downloadSeasonMagnets() {
+    const magnets = getSeasonMagnets();
+    if (!magnets.length) {
+      setNotice('No live Torrentio magnets are available for this season yet. Run Check sources first.');
+      return;
+    }
+    const safeTitle = String(selected?.title || 'season').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'season';
+    const filename = `${safeTitle}-season-${season}-magnets.txt`;
+    const url = URL.createObjectURL(new Blob([`${magnets.join('\n')}\n`], { type: 'text/plain;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setToast(`${magnets.length} season magnets downloaded`);
+    window.setTimeout(() => setToast(''), 2400);
+  }
+
   function copyStremioLink(item) {
     const link = buildStremioDownloadLink(item);
     if (!link) return;
@@ -505,6 +540,8 @@ function App() {
               <div><span className="section-kicker">EPISODE SOURCES</span><h2>Season results</h2></div>
               <div className="season-controls">
                 <div className="select-wrap"><Icon name="filter" size={15} /><select value={season} onChange={event => { setSeason(Number(event.target.value)); setEpisodes([]); setExpanded({}); setProviderMode('ready'); }} aria-label="Choose season">{seasonOptions.map(item => <option key={item} value={item}>{item === 0 ? 'Specials' : `Season ${item}`}</option>)}</select><Icon name="down" size={14} /></div>
+                <button className="secondary-button" onClick={copySeasonMagnets} disabled={checking || !episodes.length}><Icon name="copy" size={15} /> Copy season magnets</button>
+                <button className="secondary-button" onClick={downloadSeasonMagnets} disabled={checking || !episodes.length}><Icon name="down" size={15} /> Download .txt</button>
                 <button className="primary-button" onClick={checkSources} disabled={checking}>{checking ? <><span className="spinner spinner-dark" /> Scanning</> : <><Icon name="refresh" size={15} /> Check sources</>}</button>
               </div>
             </div>

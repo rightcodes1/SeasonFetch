@@ -22,6 +22,7 @@ For production, run `npm ci && npm run build && npm start`. Vercel uses `vercel.
 - Expand episode rows to inspect the selected Torrentio source, provider, seeder count, file index, tracker count, and file-aware magnet URI.
 - Open or copy Stremio local download links (`127.0.0.1:11470`) and magnet links, plus open provider URLs when Torrentio returns one.
 - Live sources expose a tracker-enhanced magnet and a raw magnet fallback. Tracker values are encoded as `tr=udp%3A...` or `tr=http%3A...`; the info hash belongs only in `xt=urn:btih:...`.
+- Copy all available live season magnets at once or download them as a newline-separated `.txt` file for batch importing into a compatible downloader. Preview fallback rows are excluded.
 - Surface partial provider failures instead of presenting them as a successful scan.
 - Responsive desktop and mobile layouts.
 
