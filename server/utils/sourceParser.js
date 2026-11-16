@@ -8,6 +8,17 @@ const SIZE_UNITS = {
   TB: 1024 ** 4
 };
 
+const FALLBACK_TRACKERS = [
+  "udp://tracker.opentrackr.org:1337/announce",
+  "udp://open.stealth.si:80/announce",
+  "udp://tracker.torrent.eu.org:451/announce",
+  "udp://open.demonii.com:1337/announce",
+  "udp://tracker.qu.ax:6969/announce",
+  "udp://tracker.uw0.xyz:6969/announce",
+  "http://tracker.renfei.net:8080/announce",
+  "http://tracker2.dler.org:80/announce"
+];
+
 export function parseSize(text = "") {
   const match = String(text).match(/(\d+(?:\.\d+)?)\s*(TB|GB|MB|KB|B)\b/i);
   if (!match) return null;
@@ -56,16 +67,18 @@ function normalizeLink(value) {
   }
 }
 
-function buildMagnet(infoHash, { filename, fileIdx, sources = [] }) {
+function buildMagnet(infoHash, { filename, fileIdx, sources = [], includeTrackers = true, fallbackTrackers = [] }) {
   const params = new URLSearchParams({ xt: `urn:btih:${infoHash}` });
   const displayName = String(filename || "").trim();
   if (displayName) params.set("dn", displayName);
   if (Number.isInteger(fileIdx) && fileIdx >= 0) params.set("so", String(fileIdx));
 
-  for (const source of sources) {
-    if (typeof source !== "string" || !source.startsWith("tracker:")) continue;
-    const tracker = source.slice("tracker:".length).trim();
-    if (tracker) params.append("tr", tracker);
+  if (includeTrackers) {
+    const trackers = sources
+      .filter(source => typeof source === "string" && source.startsWith("tracker:"))
+      .map(source => source.slice("tracker:".length).trim())
+      .filter(Boolean);
+    for (const tracker of trackers.length ? trackers : fallbackTrackers) params.append("tr", tracker);
   }
 
   return `magnet:?${params.toString()}`;
@@ -87,6 +100,9 @@ export function normalizeStream(stream = {}) {
   const fileIdx = Number.isInteger(stream.fileIdx) && stream.fileIdx >= 0 ? stream.fileIdx : null;
   const sources = Array.isArray(stream.sources) ? stream.sources.filter(item => typeof item === "string") : [];
   const filenameValue = filename || title || "1080p source";
+  const sourceTrackers = sources.filter(item => item.startsWith("tracker:"));
+  const fallbackTrackersUsed = sourceTrackers.length === 0;
+  const magnetOptions = { filename: filenameValue, fileIdx, sources, fallbackTrackers: FALLBACK_TRACKERS };
   const provider = String([stream.name, searchableText].filter(Boolean).join(" ")).match(/1337x/i) ? "1337x" : null;
   const seeders = Number.isFinite(stream.seeders) && stream.seeders >= 0
     ? stream.seeders
@@ -106,8 +122,10 @@ export function normalizeStream(stream = {}) {
     preferredProvider: is1337x(searchableText),
     sourceUrl: normalizeLink(stream.url),
     externalUrl: normalizeLink(stream.externalUrl),
-    trackerCount: sources.filter(item => item.startsWith("tracker:")).length,
-    magnet: buildMagnet(normalizedHash, { filename: filenameValue, fileIdx, sources }),
+    trackerCount: sourceTrackers.length,
+    fallbackTrackersUsed,
+    magnet: buildMagnet(normalizedHash, magnetOptions),
+    rawMagnet: buildMagnet(normalizedHash, { ...magnetOptions, includeTrackers: false }),
     resolution: "1080p"
   };
 }

@@ -56,3 +56,16 @@ test("preserves safe source links and file selection in the normalized magnet", 
   assert.match(result.magnet, /so=3/);
   assert.match(result.magnet, /tr=udp%3A%2F%2Ftracker.example.test%3A1337%2Fannounce/);
 });
+
+test("adds valid fallback trackers without putting the hash in a tracker parameter", () => {
+  const result = normalizeStream({
+    title: "Show S01E01 1080p WEB-DL",
+    infoHash: hashB,
+    sources: []
+  });
+
+  assert.equal(result.fallbackTrackersUsed, true);
+  assert.match(result.magnet, /tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce/);
+  assert.doesNotMatch(result.magnet, /tr=.*bbbb/);
+  assert.doesNotMatch(result.rawMagnet, /tr=/);
+});

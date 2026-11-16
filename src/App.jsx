@@ -324,6 +324,7 @@ function App() {
       format: row.format || row[3] || '',
       hash: '',
       magnet: '',
+      rawMagnet: '',
       preview: true,
       sourceUrl: '',
       sourceCount: row.hash || row[4] ? 1 : 0,
@@ -346,9 +347,11 @@ function App() {
         format: source?.title || '',
         hash: source?.infoHash || '',
         magnet: source?.magnet || '',
+        rawMagnet: source?.rawMagnet || '',
         sourceUrl: source?.sourceUrl || source?.externalUrl || '',
         fileIdx: source?.fileIdx ?? null,
         trackerCount: source?.trackerCount || 0,
+        fallbackTrackersUsed: source?.fallbackTrackersUsed || false,
         provider: source?.provider || '',
         seeders: source?.seeders ?? null,
         sourceCount: provider?.sources?.length || 0,
@@ -384,6 +387,13 @@ function App() {
     if (!magnet) return;
     if (navigator.clipboard?.writeText) navigator.clipboard.writeText(magnet).catch(() => {});
     setToast('Magnet link copied to clipboard');
+    window.setTimeout(() => setToast(''), 2400);
+  }
+
+  function copyRawMagnet(item) {
+    if (!item?.rawMagnet) return;
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(item.rawMagnet).catch(() => {});
+    setToast('Raw magnet link copied');
     window.setTimeout(() => setToast(''), 2400);
   }
 
@@ -519,10 +529,10 @@ function App() {
                   </div>
                   {expanded[item.id] && <div className="episode-details">
                     {item.magnet ? <>
-                      <div className="detail-top"><div><span className="detail-label">SELECTED SOURCE</span><strong>{item.format}</strong></div><div className="detail-actions">{item.sourceUrl && <a className="secondary-button small-button" href={item.sourceUrl} target="_blank" rel="noreferrer">Open source <Icon name="arrow" size={13} /></a>}{buildStremioDownloadLink(item) && <><button className="secondary-button small-button" onClick={checkStremioConnection}><Icon name="bolt" size={14} /> Check Stremio</button><a className="primary-button small-button" href={buildStremioDownloadLink(item)}>Open Stremio download <Icon name="arrow" size={13} /></a><button className="secondary-button small-button" onClick={() => copyStremioLink(item)}><Icon name="copy" size={14} /> Copy Stremio link</button></>}<a className="secondary-button small-button" href={item.magnet}>Open magnet <Icon name="link" size={13} /></a><button className="secondary-button small-button" onClick={() => copyMagnet(item.magnet)}><Icon name="copy" size={14} /> Copy magnet</button></div></div>
+                      <div className="detail-top"><div><span className="detail-label">SELECTED SOURCE</span><strong>{item.format}</strong></div><div className="detail-actions">{item.sourceUrl && <a className="secondary-button small-button" href={item.sourceUrl} target="_blank" rel="noreferrer">Open source <Icon name="arrow" size={13} /></a>}{buildStremioDownloadLink(item) && <><button className="secondary-button small-button" onClick={checkStremioConnection}><Icon name="bolt" size={14} /> Check Stremio</button><a className="primary-button small-button" href={buildStremioDownloadLink(item)}>Open Stremio download <Icon name="arrow" size={13} /></a><button className="secondary-button small-button" onClick={() => copyStremioLink(item)}><Icon name="copy" size={14} /> Copy Stremio link</button></>}<a className="secondary-button small-button" href={item.magnet}>Open magnet <Icon name="link" size={13} /></a><button className="secondary-button small-button" onClick={() => copyMagnet(item.magnet)}><Icon name="copy" size={14} /> Copy magnet with trackers</button>{item.rawMagnet && <button className="secondary-button small-button" onClick={() => copyRawMagnet(item)}><Icon name="copy" size={14} /> Copy raw magnet</button>}</div></div>
                       <div className="detail-meta"><span><b>Resolution</b>1080p</span><span><b>File size</b>{item.size}</span>{item.seeders !== null && <span><b>Seeders</b>{item.seeders.toLocaleString()}</span>}{item.provider && <span><b>Provider</b>{item.provider}</span>}<span><b>Info hash</b>{item.hash.slice(0, 12)}…</span>{item.fileIdx !== null && <span><b>File index</b>{item.fileIdx}</span>}{item.trackerCount > 0 && <span><b>Trackers</b>{item.trackerCount}</span>}</div>
                       <div className="magnet-line"><code>{item.magnet}</code><a href={item.magnet} aria-label="Open magnet">Open</a><button onClick={() => copyMagnet(item.magnet)} aria-label="Copy magnet"><Icon name="copy" size={14} /></button></div>
-                      <p className="detail-note"><Icon name="bolt" size={13} /> {providerMode === 'live' ? 'Stremio download links target the local Stremio server; magnets remain available as a fallback.' : 'Preview source selected by smallest known size.'}</p>
+                      <p className="detail-note"><Icon name="bolt" size={13} /> {providerMode === 'live' ? `${item.fallbackTrackersUsed ? 'Torrentio returned no trackers, so fallback trackers were added. ' : ''}The tracker magnet is recommended; use the raw magnet if your downloader manages its own tracker/DHT settings.` : 'Preview source selected by smallest known size.'}</p>
                     </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>{item.preview ? 'Preview data is not downloadable' : 'No valid 1080p source found'}</strong><span>{item.preview ? 'Torrentio was unavailable during this scan. Run Check sources again to retrieve a real magnet.' : (item.sourceError || 'Try again later — provider availability can change.')}</span></div></div>}
                   </div>}
                 </div>)}
