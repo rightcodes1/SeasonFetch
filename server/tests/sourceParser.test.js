@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { has1080p, normalizeStream, selectBestSource } from "../utils/sourceParser.js";
+import { has1080p, normalizeStream, parseSeeders, selectBestSource } from "../utils/sourceParser.js";
 
 const hashA = "a".repeat(40);
 const hashB = "b".repeat(40);
@@ -21,6 +21,19 @@ test("selects the smallest known 1080p Torrentio source", () => {
 
   assert.equal(result.status, "selected");
   assert.equal(result.selected.infoHash, hashB);
+});
+
+test("prefers 1337x, then most seeders, then smallest known size", () => {
+  const result = selectBestSource([
+    { title: "1080p WEB-DL 200 MB 👤 900 ⚙️ 1337x", infoHash: hashA },
+    { title: "1080p WEB-DL 100 MB 👤 50 ⚙️ ThePirateBay", infoHash: hashB },
+    { title: "1080p WEB-DL 300 MB 👤 120 ⚙️ 1337x", infoHash: "c".repeat(40) }
+  ]);
+
+  assert.equal(parseSeeders("1080p WEB-DL 👤 1,234"), 1234);
+  assert.equal(result.selected.infoHash, hashA);
+  assert.equal(result.selected.provider, "1337x");
+  assert.equal(result.selected.seeders, 900);
 });
 
 test("preserves safe source links and file selection in the normalized magnet", () => {

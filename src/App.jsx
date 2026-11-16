@@ -342,6 +342,8 @@ function App() {
         sourceUrl: source?.sourceUrl || source?.externalUrl || '',
         fileIdx: source?.fileIdx ?? null,
         trackerCount: source?.trackerCount || 0,
+        provider: source?.provider || '',
+        seeders: source?.seeders ?? null,
         sourceCount: provider?.sources?.length || 0,
         sourceError: provider?.error || '',
         candidates: provider?.sources || []
@@ -493,7 +495,7 @@ function App() {
                   {expanded[item.id] && <div className="episode-details">
                     {item.magnet ? <>
                       <div className="detail-top"><div><span className="detail-label">SELECTED SOURCE</span><strong>{item.format}</strong></div><div className="detail-actions">{item.sourceUrl && <a className="secondary-button small-button" href={item.sourceUrl} target="_blank" rel="noreferrer">Open source <Icon name="arrow" size={13} /></a>}<a className="primary-button small-button" href={item.magnet}>Open magnet <Icon name="link" size={13} /></a><button className="primary-button small-button" onClick={() => copyMagnet(item.magnet)}><Icon name="copy" size={14} /> Copy magnet</button></div></div>
-                      <div className="detail-meta"><span><b>Resolution</b>1080p</span><span><b>File size</b>{item.size}</span><span><b>Info hash</b>{item.hash.slice(0, 12)}…</span>{item.fileIdx !== null && <span><b>File index</b>{item.fileIdx}</span>}{item.trackerCount > 0 && <span><b>Trackers</b>{item.trackerCount}</span>}</div>
+                      <div className="detail-meta"><span><b>Resolution</b>1080p</span><span><b>File size</b>{item.size}</span>{item.seeders !== null && <span><b>Seeders</b>{item.seeders.toLocaleString()}</span>}{item.provider && <span><b>Provider</b>{item.provider}</span>}<span><b>Info hash</b>{item.hash.slice(0, 12)}…</span>{item.fileIdx !== null && <span><b>File index</b>{item.fileIdx}</span>}{item.trackerCount > 0 && <span><b>Trackers</b>{item.trackerCount}</span>}</div>
                       <div className="magnet-line"><code>{item.magnet}</code><a href={item.magnet} aria-label="Open magnet">Open</a><button onClick={() => copyMagnet(item.magnet)} aria-label="Copy magnet"><Icon name="copy" size={14} /></button></div>
                       <p className="detail-note"><Icon name="bolt" size={13} /> {providerMode === 'live' ? 'Normalized from Torrentio and selected by smallest known size.' : 'Preview source selected by smallest known size.'}</p>
                     </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>No valid 1080p source found</strong><span>{item.sourceError || 'Try again later — provider availability can change.'}</span></div></div>}

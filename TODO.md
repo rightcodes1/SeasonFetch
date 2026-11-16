@@ -24,7 +24,7 @@
 - [x] Use the `tt...:season:episode` Stremio series identifier format and validate IMDb IDs, seasons, and episode counts.
 - [x] Limit season lookups to three concurrent provider requests.
 - [x] Normalize Torrentio responses to valid 40-character info hashes, explicit 1080p sources, normalized file sizes, file indexes, and magnet links.
-- [x] Select the smallest known 1080p source while retaining an unknown-size source only when no known size exists.
+- [x] Select valid 1080p sources by preferring 1337x, then highest known seeder count, then smallest known file size, while retaining an unknown-size source only when no known size exists.
 - [x] Preserve safe Torrentio source URLs, file indexes, tracker counts, and file-aware magnet links.
 - [x] Query the actual Cinemeta episode numbers, including sparse or non-contiguous seasons, instead of assuming 1..N.
 - [x] Surface partial and complete Torrentio provider failures distinctly from normal no-source results.

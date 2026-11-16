@@ -36,6 +36,15 @@ export function has1080p(text = "") {
   return /(^|[^a-zA-Z0-9])1080p($|[^a-zA-Z0-9])/i.test(String(text));
 }
 
+export function parseSeeders(text = "") {
+  const match = String(text).match(/(?:👤|seeders?|peers?)\s*[:=]?\s*(\d[\d,]*)/iu);
+  return match ? Number(match[1].replace(/,/g, "")) : null;
+}
+
+function is1337x(text = "") {
+  return /(?:^|[^a-z0-9])1337x(?:$|[^a-z0-9])/i.test(String(text));
+}
+
 function normalizeLink(value) {
   if (!value) return null;
 
@@ -78,6 +87,10 @@ export function normalizeStream(stream = {}) {
   const fileIdx = Number.isInteger(stream.fileIdx) && stream.fileIdx >= 0 ? stream.fileIdx : null;
   const sources = Array.isArray(stream.sources) ? stream.sources.filter(item => typeof item === "string") : [];
   const filenameValue = filename || title || "1080p source";
+  const provider = String(stream.name || searchableText).match(/1337x/i) ? "1337x" : null;
+  const seeders = Number.isFinite(stream.seeders) && stream.seeders >= 0
+    ? stream.seeders
+    : parseSeeders(searchableText);
 
   return {
     name: stream.name || "Torrentio",
@@ -88,6 +101,9 @@ export function normalizeStream(stream = {}) {
     filename: filename || null,
     sizeBytes,
     sizeLabel: formatSize(sizeBytes),
+    provider,
+    seeders,
+    preferredProvider: is1337x(searchableText),
     sourceUrl: normalizeLink(stream.url),
     externalUrl: normalizeLink(stream.externalUrl),
     trackerCount: sources.filter(item => item.startsWith("tracker:")).length,
@@ -100,6 +116,10 @@ export function selectBestSource(streams = []) {
   const candidates = streams.map(normalizeStream).filter(Boolean);
 
   candidates.sort((a, b) => {
+    if (a.preferredProvider !== b.preferredProvider) return Number(b.preferredProvider) - Number(a.preferredProvider);
+    if (a.seeders === null && b.seeders !== null) return 1;
+    if (a.seeders !== null && b.seeders === null) return -1;
+    if (a.seeders !== b.seeders) return b.seeders - a.seeders;
     if (a.sizeBytes === null && b.sizeBytes === null) return 0;
     if (a.sizeBytes === null) return 1;
     if (b.sizeBytes === null) return -1;
