@@ -4,6 +4,7 @@ import express from "express";
 import helmet from "helmet";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { searchSeries, getSeries } from "./services/cinemeta.js";
 import { getSeasonSources } from "./services/torrentio.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -17,7 +18,25 @@ app.use(cors({ origin: process.env.CLIENT_ORIGIN || true }));
 app.use(express.json({ limit: "1mb" }));
 
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", application: "SeasonFetch", provider: "Torrentio" });
+  res.json({ status: "ok", application: "SeasonFetch", metadata: "Cinemeta", provider: "Torrentio" });
+});
+
+app.get("/api/cinemeta/search", async (req, res) => {
+  try {
+    return res.json({ results: await searchSeries(req.query.q) });
+  } catch (error) {
+    console.error("Cinemeta search failed:", error.message);
+    return res.status(502).json({ error: "Cinemeta search is unavailable right now." });
+  }
+});
+
+app.get("/api/cinemeta/series/:id", async (req, res) => {
+  try {
+    return res.json(await getSeries(req.params.id));
+  } catch (error) {
+    console.error("Cinemeta metadata failed:", error.message);
+    return res.status(404).json({ error: "Unable to retrieve that series." });
+  }
 });
 
 app.get("/api/torrentio/season/:seriesId/:season", async (req, res) => {

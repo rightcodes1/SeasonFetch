@@ -22,6 +22,6 @@ Open the Vite URL shown in the terminal. The managed Preview uses the configured
 
 ## Torrentio integration
 
-The development command starts Vite on port 3000 and the Express provider proxy on port 3001. Vite forwards `/api` requests to the proxy. The proxy calls Torrentio with the Stremio series identifier format `tt...:season:episode`, limits season lookups to three concurrent requests, accepts valid 1080p sources only, and chooses the smallest known file size. If Torrentio itself is unavailable, the Preview keeps working with clearly labeled local demo data.
+The development command starts Vite on port 3000 and the Express provider proxy on port 3001. Vite forwards `/api` requests to the proxy. Search now uses Cinemeta live, and selected series load their real season and episode metadata before scanning Torrentio. The proxy calls Torrentio with the Stremio series identifier format `tt...:season:episode`, limits season lookups to three concurrent requests, accepts valid 1080p sources only, and chooses the smallest known file size. If either provider is unavailable, the Preview keeps working with clearly labeled local demo data where possible.
 
-Set `TORRENTIO_BASE_URL` to override the default provider base URL. The proxy exposes `GET /api/health` and `GET /api/torrentio/season/:seriesId/:season?episodes=N`.
+Set `TORRENTIO_BASE_URL` or `CINEMETA_BASE_URL` to override the default provider base URLs. The proxy exposes `GET /api/health`, `GET /api/cinemeta/search?q=title`, `GET /api/cinemeta/series/:id`, and `GET /api/torrentio/season/:seriesId/:season?episodes=N`.

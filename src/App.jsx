@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { cinemeta } from './services/cinemeta.js';
 import { torrentio } from './services/torrentio.js';
 
 const SERIES = [
@@ -184,33 +185,85 @@ function App() {
   const available = useMemo(() => episodes.filter(item => item.status !== 'unavailable').length, [episodes]);
   const progress = episodes.length ? Math.round((available / episodes.length) * 100) : 0;
 
-  function runSearch(event) {
+  function runSearch(event, overrideQuery) {
     event?.preventDefault();
-    const cleanQuery = query.trim().toLowerCase();
+    const cleanQuery = String(overrideQuery ?? query).trim().toLowerCase();
     setSearchTouched(true);
     setSearching(true);
     setNotice(null);
     setSelected(null);
     setEpisodes([]);
     setExpanded({});
-    window.setTimeout(() => {
-      const nextResults = cleanQuery.length < 2 ? [] : SERIES.filter(item => `${item.title} ${item.type}`.toLowerCase().includes(cleanQuery));
-      setResults(nextResults);
-      setSearching(false);
-      if (!nextResults.length) setNotice(cleanQuery.length < 2 ? 'Enter at least two characters to search.' : 'No series found. Try another title.');
-    }, 520);
+    window.setTimeout(async () => {
+      if (cleanQuery.length < 2) {
+        setResults([]);
+        setSearching(false);
+        setNotice('Enter at least two characters to search.');
+        return;
+      }
+
+      try {
+        const data = await cinemeta.search(cleanQuery);
+        const nextResults = (data.results || []).map((item, index) => {
+          const local = SERIES.find(candidate => candidate.imdbId === item.imdbId);
+          const title = item.title || local?.title || 'Unknown title';
+          return {
+            ...local,
+            ...item,
+            id: item.id,
+            imdbId: item.imdbId || item.id,
+            title,
+            accent: local?.accent || ['purple', 'orange', 'blue', 'red'][index % 4],
+            initials: local?.initials || title.split(/\s+/).slice(0, 2).map(word => word[0]).join('').toUpperCase(),
+            posterLabel: local?.posterLabel || 'Cinemeta metadata',
+            episodes: local?.episodes || {}
+          };
+        });
+        setResults(nextResults);
+        setSearching(false);
+        if (!nextResults.length) setNotice('No series found. Try another title.');
+      } catch (error) {
+        console.warn('Cinemeta search failed; using local preview matches.', error);
+        const fallback = SERIES.filter(item => `${item.title} ${item.type}`.toLowerCase().includes(cleanQuery));
+        setResults(fallback);
+        setSearching(false);
+        setNotice(fallback.length ? 'Cinemeta is unavailable; showing local preview matches.' : 'No series found. Try another title.');
+      }
+    }, 320);
   }
 
-  function chooseSeries(series) {
-    setSelected(series);
+  async function chooseSeries(series) {
+    const local = SERIES.find(item => item.imdbId === series.imdbId || item.id === series.id);
+    const baseSeries = { ...local, ...series, imdbId: series.imdbId || series.id, seasons: series.seasons || local?.seasons || 1, episodes: series.episodes || local?.episodes || {} };
+    setSelected(baseSeries);
     setResults([]);
     setNotice(null);
     setSeason(1);
     setEpisodes([]);
     setExpanded({});
     setProviderMode('ready');
-    setToast(`${series.title} selected`);
+    setToast(`${baseSeries.title} selected`);
     window.setTimeout(() => setToast(''), 2200);
+
+    try {
+      const data = await cinemeta.getSeries(baseSeries.imdbId);
+      const remoteEpisodes = Object.fromEntries(
+        Object.entries(data.episodes || {}).map(([seasonNumber, list]) => [
+          seasonNumber,
+          list.map(item => [item.title, '—', 'unavailable', '', ''])
+        ])
+      );
+      setSelected(current => current ? {
+        ...current,
+        ...data.series,
+        id: current.id,
+        imdbId: baseSeries.imdbId,
+        episodes: Object.keys(remoteEpisodes).length ? remoteEpisodes : current.episodes,
+        seasons: Math.max(current.seasons || 0, Object.keys(remoteEpisodes).length)
+      } : current);
+    } catch (error) {
+      console.warn('Cinemeta metadata failed; retaining search result.', error);
+    }
   }
 
   function checkSources() {
@@ -351,7 +404,7 @@ function App() {
             <span className="section-kicker">READY WHEN YOU ARE</span>
             <h2>{searchTouched ? 'Search another title' : 'Start with a series'}</h2>
             <p>Find a show above to scan seasons, compare available sources, and copy a magnet in one click.</p>
-            <div className="suggestion-row"><span>Try</span>{['Breaking Bad', 'The Bear', 'Severance'].map(title => <button key={title} onClick={() => { setQuery(title); setTimeout(() => runSearch(), 0); }}>{title}</button>)}</div>
+            <div className="suggestion-row"><span>Try</span>{['Breaking Bad', 'The Bear', 'Severance'].map(title => <button key={title} onClick={() => { setQuery(title); runSearch(undefined, title); }}>{title}</button>)}</div>
           </section>
         )}
 

@@ -11,7 +11,12 @@
 - [x] Include a responsive episode source table with source availability, status, and relevant actions.
 - [x] Make episode rows expandable to reveal source information without leaving the page.
 - [x] Make copy-magnet actions functional with clear success feedback.
-- [x] Include responsive mobile layouts for the compact viewport.
+- [x] Include a responsive mobile layouts for the compact viewport.
+
+## Live Cinemeta metadata
+- [x] Search arbitrary TV titles through the server-side Cinemeta proxy instead of limiting search to local demo titles.
+- [x] Load selected-series metadata, real season counts, and normalized episode metadata from Cinemeta.
+- [x] Preserve a clearly labeled local preview catalog fallback when Cinemeta is unavailable.
 
 ## Live Torrentio provider
 - [x] Add a server-side Express proxy for Torrentio rather than calling the provider directly from the browser.
@@ -24,5 +29,6 @@
 ## Delivery checks
 - [x] Verify the Vite Preview forwards API requests to the provider proxy.
 - [x] Verify the real Torrentio proxy returns a normalized Breaking Bad source.
+- [x] Verify live Cinemeta search and metadata loading for The Office, including real season options.
 - [x] Verify parser tests and the production frontend build complete successfully.
 - [ ] Configure production deployment routing for the Express server if publishing is requested.
