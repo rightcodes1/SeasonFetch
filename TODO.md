@@ -33,7 +33,7 @@
 ## Production deployment
 - [x] Export the Express app for a Vercel Node function while retaining the local server entrypoint.
 - [x] Add Vercel build and API rewrite configuration for the Vite frontend and provider proxy.
-- [ ] Verify a production deployment serves `/`, `/api/health`, Cinemeta search, and Torrentio source scans.
+- [x] Verify the production deployment serves `/`, `/api/health`, Cinemeta search, and Torrentio source scans.
 
 ## Delivery checks
 - [x] Verify the Vite Preview forwards API requests to the provider proxy.
