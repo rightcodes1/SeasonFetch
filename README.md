@@ -30,4 +30,6 @@ The development command starts Vite on port 3000 and the Express provider proxy 
 
 Stremio download links use the local desktop server format `http://127.0.0.1:11470/<infoHash>/<fileIndex>?external=1&download=1`. They work only when Stremio Desktop is running with its local server available on the same computer as the browser; magnet links remain available as a fallback.
 
+If a Stremio link reports `ERR_CONNECTION_REFUSED`, first open `http://127.0.0.1:11470/` in the same browser. If that also fails, start Stremio Desktop or install and start [Stremio Service](https://www.stremio.com/download-service). Stremio’s official guidance says the companion service must be installed and running for local streaming-server features, and the browser and service must be on the same computer. The expanded source panel also includes **Check Stremio** to test this connection.
+
 Set `TORRENTIO_BASE_URL`, `CINEMETA_BASE_URL`, or `CLIENT_ORIGIN` to override production defaults. The proxy exposes `GET /api/health`, `GET /api/cinemeta/search?q=title`, `GET /api/cinemeta/series/:id`, and `GET /api/torrentio/season/:seriesId/:season?episodes=1,2,3`.
