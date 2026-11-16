@@ -87,7 +87,7 @@ export function normalizeStream(stream = {}) {
   const fileIdx = Number.isInteger(stream.fileIdx) && stream.fileIdx >= 0 ? stream.fileIdx : null;
   const sources = Array.isArray(stream.sources) ? stream.sources.filter(item => typeof item === "string") : [];
   const filenameValue = filename || title || "1080p source";
-  const provider = String(stream.name || searchableText).match(/1337x/i) ? "1337x" : null;
+  const provider = String([stream.name, searchableText].filter(Boolean).join(" ")).match(/1337x/i) ? "1337x" : null;
   const seeders = Number.isFinite(stream.seeders) && stream.seeders >= 0
     ? stream.seeders
     : parseSeeders(searchableText);
