@@ -322,10 +322,9 @@ function App() {
       size: row.size || row[1] || '—',
       status: row.status || row[2] || 'unavailable',
       format: row.format || row[3] || '',
-      hash: row.hash || row[4] || '',
-      magnet: (row.hash || row[4])
-        ? `magnet:?xt=urn:btih:${row.hash || row[4]}&dn=${encodeURIComponent(selected.title + ' S' + String(season).padStart(2, '0') + 'E' + String(episodeNumbers[index]).padStart(2, '0'))}`
-        : '',
+      hash: '',
+      magnet: '',
+      preview: true,
       sourceUrl: '',
       sourceCount: row.hash || row[4] ? 1 : 0,
       sourceError: '',
@@ -524,7 +523,7 @@ function App() {
                       <div className="detail-meta"><span><b>Resolution</b>1080p</span><span><b>File size</b>{item.size}</span>{item.seeders !== null && <span><b>Seeders</b>{item.seeders.toLocaleString()}</span>}{item.provider && <span><b>Provider</b>{item.provider}</span>}<span><b>Info hash</b>{item.hash.slice(0, 12)}…</span>{item.fileIdx !== null && <span><b>File index</b>{item.fileIdx}</span>}{item.trackerCount > 0 && <span><b>Trackers</b>{item.trackerCount}</span>}</div>
                       <div className="magnet-line"><code>{item.magnet}</code><a href={item.magnet} aria-label="Open magnet">Open</a><button onClick={() => copyMagnet(item.magnet)} aria-label="Copy magnet"><Icon name="copy" size={14} /></button></div>
                       <p className="detail-note"><Icon name="bolt" size={13} /> {providerMode === 'live' ? 'Stremio download links target the local Stremio server; magnets remain available as a fallback.' : 'Preview source selected by smallest known size.'}</p>
-                    </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>No valid 1080p source found</strong><span>{item.sourceError || 'Try again later — provider availability can change.'}</span></div></div>}
+                    </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>{item.preview ? 'Preview data is not downloadable' : 'No valid 1080p source found'}</strong><span>{item.preview ? 'Torrentio was unavailable during this scan. Run Check sources again to retrieve a real magnet.' : (item.sourceError || 'Try again later — provider availability can change.')}</span></div></div>}
                   </div>}
                 </div>)}
               </div>

@@ -32,4 +32,6 @@ Stremio download links use the local desktop server format `http://127.0.0.1:114
 
 If a Stremio link reports `ERR_CONNECTION_REFUSED`, first open `http://127.0.0.1:11470/` in the same browser. If that also fails, start Stremio Desktop or install and start [Stremio Service](https://www.stremio.com/download-service). Stremio’s official guidance says the companion service must be installed and running for local streaming-server features, and the browser and service must be on the same computer. The expanded source panel also includes **Check Stremio** to test this connection.
 
+Only live Torrentio results produce downloadable magnets. When Torrentio is unavailable, SeasonFetch may show clearly labeled preview rows, but it no longer exposes their placeholder hashes as magnets because those hashes cannot resolve metadata and would remain stuck on “querying info.”
+
 Set `TORRENTIO_BASE_URL`, `CINEMETA_BASE_URL`, or `CLIENT_ORIGIN` to override production defaults. The proxy exposes `GET /api/health`, `GET /api/cinemeta/search?q=title`, `GET /api/cinemeta/series/:id`, and `GET /api/torrentio/season/:seriesId/:season?episodes=1,2,3`.
