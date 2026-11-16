@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
+import { torrentio } from './services/torrentio.js';
 
 const SERIES = [
   {
     id: 'breaking-bad',
+    imdbId: 'tt0903747',
     title: 'Breaking Bad',
     year: '2008',
     seasons: 5,
@@ -39,6 +41,7 @@ const SERIES = [
   },
   {
     id: 'the-bear',
+    imdbId: 'tt14452776',
     title: 'The Bear',
     year: '2022',
     seasons: 3,
@@ -64,6 +67,7 @@ const SERIES = [
   },
   {
     id: 'severance',
+    imdbId: 'tt11280740',
     title: 'Severance',
     year: '2022',
     seasons: 2,
@@ -89,6 +93,7 @@ const SERIES = [
   },
   {
     id: 'succession',
+    imdbId: 'tt7660850',
     title: 'Succession',
     year: '2018',
     seasons: 4,
@@ -174,6 +179,7 @@ function App() {
   const [notice, setNotice] = useState(null);
   const [toast, setToast] = useState('');
   const [searchTouched, setSearchTouched] = useState(false);
+  const [providerMode, setProviderMode] = useState('ready');
 
   const available = useMemo(() => episodes.filter(item => item.status !== 'unavailable').length, [episodes]);
   const progress = episodes.length ? Math.round((available / episodes.length) * 100) : 0;
@@ -202,6 +208,7 @@ function App() {
     setSeason(1);
     setEpisodes([]);
     setExpanded({});
+    setProviderMode('ready');
     setToast(`${series.title} selected`);
     window.setTimeout(() => setToast(''), 2200);
   }
@@ -212,21 +219,60 @@ function App() {
     setEpisodes([]);
     setExpanded({});
     setNotice(null);
-    window.setTimeout(() => {
-      const next = (selected.episodes[season] || selected.episodes[1] || []).map((row, index) => ({
+    const baseRows = selected.episodes[season] || selected.episodes[1] || [];
+
+    const makeDemoRows = () => baseRows.map((row, index) => ({
+      id: `${selected.id}-${season}-${index + 1}`,
+      number: index + 1,
+      title: row[0],
+      size: row[1],
+      status: row[2],
+      format: row[3],
+      hash: row[4],
+      magnet: row[4]
+        ? `magnet:?xt=urn:btih:${row[4]}&dn=${encodeURIComponent(selected.title + ' S' + String(season).padStart(2, '0') + 'E' + String(index + 1).padStart(2, '0'))}`
+        : '',
+      sourceCount: row[4] ? 1 : 0,
+      sourceError: ''
+    }));
+
+    const mapProviderRows = providerResults => baseRows.map((row, index) => {
+      const provider = providerResults.find(item => item.episode === index + 1);
+      const source = provider?.selected;
+      const status = provider?.status === 'error' ? 'unavailable' : (provider?.status || 'unavailable');
+
+      return {
         id: `${selected.id}-${season}-${index + 1}`,
         number: index + 1,
         title: row[0],
-        size: row[1],
-        status: row[2],
-        format: row[3],
-        hash: row[4],
-        magnet: row[4] ? `magnet:?xt=urn:btih:${row[4]}&dn=${encodeURIComponent(selected.title + ' S' + String(season).padStart(2, '0') + 'E' + String(index + 1).padStart(2, '0'))}` : ''
-      }));
-      setEpisodes(next);
-      setChecking(false);
-      setToast(`Season ${season} source scan complete`);
-      window.setTimeout(() => setToast(''), 2600);
+        size: source?.sizeLabel || (status === 'unavailable' ? '—' : 'Unknown'),
+        status,
+        format: source?.title || '',
+        hash: source?.infoHash || '',
+        magnet: source?.magnet || '',
+        sourceCount: provider?.sources?.length || 0,
+        sourceError: provider?.error || ''
+      };
+    });
+
+    window.setTimeout(() => {
+      torrentio.getSeasonSources(selected.imdbId, season, baseRows.length)
+        .then(data => {
+          setEpisodes(mapProviderRows(data.results || []));
+          setProviderMode('live');
+          setChecking(false);
+          setToast(`Season ${season} Torrentio scan complete`);
+          window.setTimeout(() => setToast(''), 2600);
+        })
+        .catch(error => {
+          console.warn('Torrentio lookup failed; using preview data.', error);
+          setEpisodes(makeDemoRows());
+          setProviderMode('demo');
+          setChecking(false);
+          setNotice('Torrentio is unavailable right now, so preview source data is shown instead.');
+          setToast('Showing preview fallback data');
+          window.setTimeout(() => setToast(''), 2600);
+        });
     }, 760);
   }
 
@@ -245,6 +291,7 @@ function App() {
     setNotice(null);
     setExpanded({});
     setSearchTouched(false);
+    setProviderMode('ready');
   }
 
   const seasonOptions = Array.from({ length: selected?.seasons || 0 }, (_, index) => index + 1);
@@ -313,7 +360,7 @@ function App() {
             <div className="series-banner">
               <Poster series={selected} large />
               <div className="selected-info">
-                <div className="selected-topline"><span className="section-kicker">SELECTED SERIES</span><span className="synced"><Icon name="check" size={12} /> Metadata synced</span></div>
+                <div className="selected-topline"><span className="section-kicker">SELECTED SERIES</span>{providerMode === 'live' ? <span className="synced"><i /> Torrentio live</span> : providerMode === 'demo' ? <span className="synced demo-provider"><Icon name="dots" size={12} /> Preview fallback</span> : <span className="synced"><Icon name="check" size={12} /> Metadata synced</span>}</div>
                 <h2>{selected.title}</h2>
                 <div className="selected-meta"><span>{selected.year}</span><i /> <span>{selected.type}</span><i /> <span><Icon name="bolt" size={12} /> {selected.rating}</span></div>
                 <p className="synopsis">{selected.synopsis}</p>
@@ -325,7 +372,7 @@ function App() {
             <div className="season-toolbar">
               <div><span className="section-kicker">EPISODE SOURCES</span><h2>Season results</h2></div>
               <div className="season-controls">
-                <div className="select-wrap"><Icon name="filter" size={15} /><select value={season} onChange={event => { setSeason(Number(event.target.value)); setEpisodes([]); setExpanded({}); }} aria-label="Choose season">{seasonOptions.map(item => <option key={item} value={item}>Season {item}</option>)}</select><Icon name="down" size={14} /></div>
+                <div className="select-wrap"><Icon name="filter" size={15} /><select value={season} onChange={event => { setSeason(Number(event.target.value)); setEpisodes([]); setExpanded({}); setProviderMode('ready'); }} aria-label="Choose season">{seasonOptions.map(item => <option key={item} value={item}>Season {item}</option>)}</select><Icon name="down" size={14} /></div>
                 <button className="primary-button" onClick={checkSources} disabled={checking}>{checking ? <><span className="spinner spinner-dark" /> Scanning</> : <><Icon name="refresh" size={15} /> Check sources</>}</button>
               </div>
             </div>
@@ -336,7 +383,7 @@ function App() {
               <div className="summary-panel">
                 <div className="summary-stat"><span className="summary-label">AVAILABLE</span><strong>{available}<small>/{episodes.length}</small></strong></div>
                 <div className="summary-progress"><div className="progress-label"><span>Season coverage</span><b>{progress}%</b></div><div className="progress-track"><i style={{ width: `${progress}%` }} /></div></div>
-                <div className="summary-chip"><span className="chip-dot" /> 1080p filter active</div>
+                <div className="summary-chip"><span className="chip-dot" /> {providerMode === 'live' ? 'Torrentio live · 1080p only' : providerMode === 'demo' ? 'Preview fallback · 1080p only' : '1080p filter active'}</div>
               </div>
               <div className="episode-table">
                 <div className="table-header"><span>EPISODE</span><span>SOURCE</span><span>FILE SIZE</span><span>STATUS</span><span /></div>
@@ -353,8 +400,8 @@ function App() {
                       <div className="detail-top"><div><span className="detail-label">SELECTED SOURCE</span><strong>{item.format}</strong></div><button className="primary-button small-button" onClick={() => copyMagnet(item.magnet)}><Icon name="copy" size={14} /> Copy magnet</button></div>
                       <div className="detail-meta"><span><b>Resolution</b>1080p</span><span><b>File size</b>{item.size}</span><span><b>Info hash</b>{item.hash.slice(0, 12)}…</span></div>
                       <div className="magnet-line"><code>{item.magnet}</code><button onClick={() => copyMagnet(item.magnet)} aria-label="Copy magnet"><Icon name="copy" size={14} /></button></div>
-                      <p className="detail-note"><Icon name="bolt" size={13} /> Selected from valid 1080p sources by smallest known size.</p>
-                    </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>No valid 1080p source found</strong><span>Try again later — provider availability can change.</span></div></div>}
+                      <p className="detail-note"><Icon name="bolt" size={13} /> {providerMode === 'live' ? 'Normalized from Torrentio and selected by smallest known size.' : 'Preview source selected by smallest known size.'}</p>
+                    </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>No valid 1080p source found</strong><span>{item.sourceError || 'Try again later — provider availability can change.'}</span></div></div>}
                   </div>}
                 </div>)}
               </div>
@@ -365,7 +412,7 @@ function App() {
         )}
       </main>
 
-      <footer className="footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Metadata: Cinemeta <i /> Sources: Torrentio <i /> Preview build 0.1</span></footer>
+      <footer className="footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Metadata: local preview <i /> Sources: Torrentio proxy <i /> Preview build 0.2</span></footer>
       {toast && <div className="toast"><span className="toast-icon"><Icon name="check" size={14} /></span>{toast}</div>}
     </div>
   );

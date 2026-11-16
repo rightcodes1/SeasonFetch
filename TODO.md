@@ -13,7 +13,16 @@
 - [x] Make copy-magnet actions functional with clear success feedback.
 - [x] Include responsive mobile layouts for the compact viewport.
 
+## Live Torrentio provider
+- [x] Add a server-side Express proxy for Torrentio rather than calling the provider directly from the browser.
+- [x] Use the `tt...:season:episode` Stremio series identifier format and validate IMDb IDs, seasons, and episode counts.
+- [x] Limit season lookups to three concurrent provider requests.
+- [x] Normalize Torrentio responses to valid 40-character info hashes, explicit 1080p sources, normalized file sizes, file indexes, and magnet links.
+- [x] Select the smallest known 1080p source while retaining an unknown-size source only when no known size exists.
+- [x] Show live Torrentio status in the UI and preserve clearly labeled preview fallback data when the provider is unavailable.
+
 ## Delivery checks
-- [ ] Verify the Vite dev server listens on the configured Preview port.
-- [ ] Verify the production build completes successfully.
-- [ ] Capture desktop and mobile Preview screenshots for visual inspection.
+- [x] Verify the Vite Preview forwards API requests to the provider proxy.
+- [x] Verify the real Torrentio proxy returns a normalized Breaking Bad source.
+- [x] Verify parser tests and the production frontend build complete successfully.
+- [ ] Configure production deployment routing for the Express server if publishing is requested.

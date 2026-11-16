@@ -81,6 +81,9 @@ h1 span { color: #b28dfc; }
 .selected-info { min-width: 0; flex: 1; }
 .selected-topline { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .synced { display: inline-flex; align-items: center; gap: 5px; color: #7bcb9e; font-size: 10px; }
+.synced i { width: 6px; height: 6px; display: inline-block; border-radius: 50%; background: #7bcb9e; box-shadow: 0 0 9px #7bcb9e; }
+.synced.demo-provider { color: #d9b56f; }
+.synced.demo-provider svg { color: #d9b56f; }
 .selected-info h2 { margin: 7px 0 4px; color: #f5f2f8; font: 600 27px 'Space Grotesk', sans-serif; letter-spacing: -1px; }
 .selected-meta { display: flex; align-items: center; color: #97929f; font-size: 11px; }
 .selected-meta span:last-child { display: inline-flex; align-items: center; gap: 4px; color: #b99aff; }

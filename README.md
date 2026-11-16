@@ -1,6 +1,6 @@
 # SeasonFetch
 
-SeasonFetch is a polished interactive front-end preview for discovering TV episode sources. It recreates the supplied reference direction with local sample data so the interface is immediately clickable in Preview without waiting on external providers.
+SeasonFetch is a polished interactive front-end for discovering TV episode sources. It recreates the supplied reference direction and connects to Torrentio through a server-side proxy that normalizes provider responses before they reach the UI.
 
 ## Run locally
 
@@ -19,3 +19,9 @@ Open the Vite URL shown in the terminal. The managed Preview uses the configured
 - Expand episode rows to inspect the selected source and magnet URI.
 - Copy magnet links with success feedback.
 - Responsive desktop and mobile layouts.
+
+## Torrentio integration
+
+The development command starts Vite on port 3000 and the Express provider proxy on port 3001. Vite forwards `/api` requests to the proxy. The proxy calls Torrentio with the Stremio series identifier format `tt...:season:episode`, limits season lookups to three concurrent requests, accepts valid 1080p sources only, and chooses the smallest known file size. If Torrentio itself is unavailable, the Preview keeps working with clearly labeled local demo data.
+
+Set `TORRENTIO_BASE_URL` to override the default provider base URL. The proxy exposes `GET /api/health` and `GET /api/torrentio/season/:seriesId/:season?episodes=N`.
