@@ -3,7 +3,7 @@ import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { searchSeries, getSeries } from "./services/cinemeta.js";
 import { getSeasonSources } from "./services/torrentio.js";
 
@@ -44,7 +44,7 @@ app.get("/api/torrentio/season/:seriesId/:season", async (req, res) => {
   const season = Number(req.params.season);
   const episodeCount = Number(req.query.episodes);
 
-  if (!/^tt\d+$/.test(seriesId)) {
+  if (!/^tt\\d+$/.test(seriesId)) {
     return res.status(400).json({ error: "Invalid series IMDb ID." });
   }
 
@@ -80,6 +80,12 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ error: "Internal server error." });
 });
 
-app.listen(port, "0.0.0.0", () => {
-  console.log(`SeasonFetch API running on port ${port}`);
-});
+// Vercel imports this module as a serverless handler; local development still
+// starts the standalone Express server when this file is executed directly.
+if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+  app.listen(port, "0.0.0.0", () => {
+    console.log(`SeasonFetch API running on port ${port}`);
+  });
+}
+
+export default app;
