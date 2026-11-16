@@ -118,6 +118,14 @@ const SERIES = [
   }
 ];
 
+const STREMIO_DOWNLOAD_ORIGIN = 'http://127.0.0.1:11470';
+
+function buildStremioDownloadLink(item) {
+  if (!item?.hash) return '';
+  const fileIndex = Number.isInteger(item.fileIdx) && item.fileIdx >= 0 ? item.fileIdx : 0;
+  return `${STREMIO_DOWNLOAD_ORIGIN}/${encodeURIComponent(item.hash)}/${fileIndex}?external=1&download=1`;
+}
+
 const ICONS = {
   search: 'M11 11 20 20M13.5 6.5a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z',
   arrow: 'M5 12h14M13 6l6 6-6 6',
@@ -380,6 +388,14 @@ function App() {
     window.setTimeout(() => setToast(''), 2400);
   }
 
+  function copyStremioLink(item) {
+    const link = buildStremioDownloadLink(item);
+    if (!link) return;
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(link).catch(() => {});
+    setToast('Stremio download link copied');
+    window.setTimeout(() => setToast(''), 2400);
+  }
+
   function reset() {
     setQuery('');
     setResults([]);
@@ -494,10 +510,10 @@ function App() {
                   </div>
                   {expanded[item.id] && <div className="episode-details">
                     {item.magnet ? <>
-                      <div className="detail-top"><div><span className="detail-label">SELECTED SOURCE</span><strong>{item.format}</strong></div><div className="detail-actions">{item.sourceUrl && <a className="secondary-button small-button" href={item.sourceUrl} target="_blank" rel="noreferrer">Open source <Icon name="arrow" size={13} /></a>}<a className="primary-button small-button" href={item.magnet}>Open magnet <Icon name="link" size={13} /></a><button className="primary-button small-button" onClick={() => copyMagnet(item.magnet)}><Icon name="copy" size={14} /> Copy magnet</button></div></div>
+                      <div className="detail-top"><div><span className="detail-label">SELECTED SOURCE</span><strong>{item.format}</strong></div><div className="detail-actions">{item.sourceUrl && <a className="secondary-button small-button" href={item.sourceUrl} target="_blank" rel="noreferrer">Open source <Icon name="arrow" size={13} /></a>}{buildStremioDownloadLink(item) && <><a className="primary-button small-button" href={buildStremioDownloadLink(item)}>Open Stremio download <Icon name="arrow" size={13} /></a><button className="secondary-button small-button" onClick={() => copyStremioLink(item)}><Icon name="copy" size={14} /> Copy Stremio link</button></>}<a className="secondary-button small-button" href={item.magnet}>Open magnet <Icon name="link" size={13} /></a><button className="secondary-button small-button" onClick={() => copyMagnet(item.magnet)}><Icon name="copy" size={14} /> Copy magnet</button></div></div>
                       <div className="detail-meta"><span><b>Resolution</b>1080p</span><span><b>File size</b>{item.size}</span>{item.seeders !== null && <span><b>Seeders</b>{item.seeders.toLocaleString()}</span>}{item.provider && <span><b>Provider</b>{item.provider}</span>}<span><b>Info hash</b>{item.hash.slice(0, 12)}…</span>{item.fileIdx !== null && <span><b>File index</b>{item.fileIdx}</span>}{item.trackerCount > 0 && <span><b>Trackers</b>{item.trackerCount}</span>}</div>
                       <div className="magnet-line"><code>{item.magnet}</code><a href={item.magnet} aria-label="Open magnet">Open</a><button onClick={() => copyMagnet(item.magnet)} aria-label="Copy magnet"><Icon name="copy" size={14} /></button></div>
-                      <p className="detail-note"><Icon name="bolt" size={13} /> {providerMode === 'live' ? 'Normalized from Torrentio and selected by smallest known size.' : 'Preview source selected by smallest known size.'}</p>
+                      <p className="detail-note"><Icon name="bolt" size={13} /> {providerMode === 'live' ? 'Stremio download links target the local Stremio server; magnets remain available as a fallback.' : 'Preview source selected by smallest known size.'}</p>
                     </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>No valid 1080p source found</strong><span>{item.sourceError || 'Try again later — provider availability can change.'}</span></div></div>}
                   </div>}
                 </div>)}

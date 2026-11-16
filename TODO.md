@@ -12,6 +12,7 @@
 - [x] Include a responsive episode source table with source availability, status, and relevant actions.
 - [x] Make episode rows expandable to reveal source information without leaving the page.
 - [x] Make open-magnet, provider-link, and copy-magnet actions functional with clear success feedback.
+- [x] Offer Stremio local download-link open/copy actions using the selected info hash and file index, while retaining magnet fallback actions.
 - [x] Include a responsive mobile layouts for the compact viewport.
 
 ## Live Cinemeta metadata
