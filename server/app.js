@@ -44,7 +44,7 @@ app.get("/api/torrentio/season/:seriesId/:season", async (req, res) => {
   const season = Number(req.params.season);
   const episodeCount = Number(req.query.episodes);
 
-  if (!/^tt\\d+$/.test(seriesId)) {
+  if (!/^tt\d+$/.test(seriesId)) {
     return res.status(400).json({ error: "Invalid series IMDb ID." });
   }
 
