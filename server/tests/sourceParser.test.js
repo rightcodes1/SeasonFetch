@@ -94,7 +94,9 @@ test("adds valid fallback trackers without putting the hash in a tracker paramet
 test("detects explicit English-dub and dual-audio release labels", () => {
   assert.equal(hasEnglishDub("Show S01E01 1080p ENG DUB"), true);
   assert.equal(hasEnglishDub("Show S01E01 1080p English Dub"), true);
-  assert.equal(hasEnglishDub("Show S01E01 1080p Dual Audio"), true);
+  assert.equal(hasEnglishDub("Show S01E01 1080p Dual Audio"), false);
+  assert.equal(hasEnglishDub("Show S01E01 1080p Dual Audio / 🇬🇧"), true);
+  assert.equal(hasEnglishDub("Show S01E01 1080p Dual Audio [Hindi+Eng]"), true);
   assert.equal(hasEnglishDub("Show S01E01 1080p WEB-DL"), false);
   assert.equal(hasEnglishDub("Show S01E01 1080p English subtitles"), false);
   assert.equal(hasEnglishDub("Show S01E01 1080p No English Dub"), false);
@@ -108,7 +110,7 @@ test("detects English-dub metadata in Torrentio descriptions and filenames", () 
   });
   const fromFilename = normalizeStream({
     title: "Show S01E01 1080p WEB-DL 1 GB",
-    behaviorHints: { filename: "Show S01E01 1080p Dual Audio.mkv" },
+    behaviorHints: { filename: "Show S01E01 1080p Dual Audio / 🇬🇧.mkv" },
     infoHash: hashB
   });
 
