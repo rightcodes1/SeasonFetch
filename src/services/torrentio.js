@@ -7,8 +7,8 @@ async function request(path) {
 }
 
 export const torrentio = {
-  getSeasonSources(seriesId, season, episodeNumbers, preference = 'default') {
+  getSeasonSources(seriesId, season, episodeNumbers, preference = 'default', englishDubOnly = false) {
     const episodes = Array.isArray(episodeNumbers) ? episodeNumbers.join(",") : episodeNumbers;
-    return request(`/api/torrentio/season/${encodeURIComponent(seriesId)}/${season}?episodes=${encodeURIComponent(episodes)}&preference=${encodeURIComponent(preference)}`);
+    return request(`/api/torrentio/season/${encodeURIComponent(seriesId)}/${season}?episodes=${encodeURIComponent(episodes)}&preference=${encodeURIComponent(preference)}&englishDubOnly=${englishDubOnly}`);
   }
 };
