@@ -108,7 +108,7 @@ test("detects English-dub metadata in Torrentio descriptions and filenames", () 
   });
   const fromFilename = normalizeStream({
     title: "Show S01E01 1080p WEB-DL 1 GB",
-    behaviorHints: { filename: "Show.S01E01.1080p.DUAL.AUDIO.mkv" },
+    behaviorHints: { filename: "Show S01E01 1080p Dual Audio.mkv" },
     infoHash: hashB
   });
 
