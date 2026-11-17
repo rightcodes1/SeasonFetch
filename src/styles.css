@@ -114,6 +114,7 @@ h1 span { color: #b28dfc; }
 .season-controls { display: flex; align-items: center; gap: 9px; }
 .select-wrap { position: relative; display: flex; align-items: center; gap: 7px; height: 40px; padding: 0 11px; border: 1px solid #ffffff1c; border-radius: 9px; color: #928c9b; background: #18191f; }
 .select-wrap select { appearance: none; min-width: 88px; padding: 0 18px 0 1px; border: 0; outline: 0; color: #e8e5ed; background: transparent; font-size: 11px; }
+.preference-wrap select { min-width: 145px; }
 .select-wrap > svg:last-child { position: absolute; right: 8px; pointer-events: none; }
 .primary-button { min-height: 40px; padding: 10px 13px; font-size: 11px; }
 .scan-panel { position: relative; display: flex; align-items: center; gap: 12px; min-height: 74px; margin-bottom: 15px; overflow: hidden; padding: 15px 18px; border: 1px solid #a98af52b; border-radius: 11px; color: #d4cbeb; background: #211d2d; }
@@ -225,6 +226,8 @@ h1 span { color: #b28dfc; }
   .season-controls { width: 100%; }
   .select-wrap { flex: 1; }
   .select-wrap select { width: 100%; }
+  .preference-wrap { flex-basis: 100%; }
+  .preference-wrap select { min-width: 0; }
   .primary-button { flex: 1; }
   .summary-panel { gap: 15px; flex-wrap: wrap; }
   .summary-progress { min-width: 100%; order: 3; }

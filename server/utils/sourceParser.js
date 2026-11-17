@@ -130,17 +130,28 @@ export function normalizeStream(stream = {}) {
   };
 }
 
-export function selectBestSource(streams = []) {
+export function selectBestSource(streams = [], preference = "default") {
   const candidates = streams.map(normalizeStream).filter(Boolean);
+  const mode = ["default", "smallest", "seeders", "1337x"].includes(preference) ? preference : "default";
 
   candidates.sort((a, b) => {
+    if (mode === "1337x" && a.preferredProvider !== b.preferredProvider) {
+      return Number(b.preferredProvider) - Number(a.preferredProvider);
+    }
+    if (mode === "seeders") {
+      if (a.seeders === null && b.seeders !== null) return 1;
+      if (a.seeders !== null && b.seeders === null) return -1;
+      if (a.seeders !== b.seeders) return b.seeders - a.seeders;
+    }
     if (a.sizeBytes === null && b.sizeBytes === null) return 0;
     if (a.sizeBytes === null) return 1;
     if (b.sizeBytes === null) return -1;
     if (a.sizeBytes !== b.sizeBytes) return a.sizeBytes - b.sizeBytes;
-    if (a.seeders === null && b.seeders !== null) return 1;
-    if (a.seeders !== null && b.seeders === null) return -1;
-    if (a.seeders !== b.seeders) return b.seeders - a.seeders;
+    if (mode !== "seeders") {
+      if (a.seeders === null && b.seeders !== null) return 1;
+      if (a.seeders !== null && b.seeders === null) return -1;
+      if (a.seeders !== b.seeders) return b.seeders - a.seeders;
+    }
     return Number(b.preferredProvider) - Number(a.preferredProvider);
   });
 

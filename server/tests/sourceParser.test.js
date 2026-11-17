@@ -46,6 +46,17 @@ test("uses 1337x only as a tie-breaker after size and seeders", () => {
   assert.equal(result.selected.provider, "1337x");
 });
 
+test("supports most-seeders and prefer-1337x presets", () => {
+  const streams = [
+    { title: "1080p WEB-DL 100 MB 👤 50 ⚙️ ThePirateBay", infoHash: hashA },
+    { title: "1080p WEB-DL 200 MB 👤 900 ⚙️ 1337x", infoHash: hashB }
+  ];
+
+  assert.equal(selectBestSource(streams, "seeders").selected.infoHash, hashB);
+  assert.equal(selectBestSource(streams, "1337x").selected.infoHash, hashB);
+  assert.equal(selectBestSource(streams, "unknown").selected.infoHash, hashA);
+});
+
 test("preserves safe source links and file selection in the normalized magnet", () => {
   const result = normalizeStream({
     name: "Torrentio",

@@ -119,6 +119,12 @@ const SERIES = [
 ];
 
 const STREMIO_DOWNLOAD_ORIGIN = 'http://127.0.0.1:11470';
+const TORRENTIO_PREFERENCES = [
+  { value: 'default', label: 'Default · size + seeders' },
+  { value: 'smallest', label: 'Smallest file' },
+  { value: 'seeders', label: 'Most seeders' },
+  { value: '1337x', label: 'Prefer 1337x' }
+];
 
 function buildStremioDownloadLink(item) {
   if (!item?.hash) return '';
@@ -204,6 +210,10 @@ function App() {
   const [geminiLoading, setGeminiLoading] = useState({});
   const [searchSuggestions, setSearchSuggestions] = useState([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [torrentioPreference, setTorrentioPreference] = useState(() => {
+    const stored = window.localStorage.getItem('seasonfetch:torrentio-preference');
+    return TORRENTIO_PREFERENCES.some(option => option.value === stored) ? stored : 'default';
+  });
 
   const available = useMemo(() => episodes.filter(item => !['unavailable', 'provider-error'].includes(item.status)).length, [episodes]);
   const progress = episodes.length ? Math.round((available / episodes.length) * 100) : 0;
@@ -363,6 +373,15 @@ function App() {
     }
   }
 
+  function changeTorrentioPreference(value) {
+    setTorrentioPreference(value);
+    window.localStorage.setItem('seasonfetch:torrentio-preference', value);
+    setEpisodes([]);
+    setExpanded({});
+    setProviderMode('ready');
+    setNotice('Preference changed. Run Check sources to scan with it.');
+  }
+
   function checkSources() {
     if (!selected) return;
     setChecking(true);
@@ -426,7 +445,7 @@ function App() {
     });
 
     window.setTimeout(() => {
-      torrentio.getSeasonSources(selected.imdbId, season, episodeNumbers)
+      torrentio.getSeasonSources(selected.imdbId, season, episodeNumbers, torrentioPreference)
         .then(data => {
           setEpisodes(mapProviderRows(data.results || []));
           setProviderMode(data.status === 'partial' ? 'partial' : data.status === 'error' ? 'error' : 'live');
@@ -645,6 +664,7 @@ function App() {
               <div><span className="section-kicker">EPISODE SOURCES</span><h2>Season results</h2></div>
               <div className="season-controls">
                 <div className="select-wrap"><Icon name="filter" size={15} /><select value={season} onChange={event => { setSeason(Number(event.target.value)); setEpisodes([]); setExpanded({}); setProviderMode('ready'); }} aria-label="Choose season">{seasonOptions.map(item => <option key={item} value={item}>{item === 0 ? 'Specials' : `Season ${item}`}</option>)}</select><Icon name="down" size={14} /></div>
+                <div className="select-wrap preference-wrap"><Icon name="trend" size={15} /><select value={torrentioPreference} onChange={event => changeTorrentioPreference(event.target.value)} aria-label="Choose Torrentio ranking preference">{TORRENTIO_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
                 <button className="secondary-button" onClick={copySeasonMagnets} disabled={checking || !episodes.length}><Icon name="copy" size={15} /> Copy season magnets</button>
                 <button className="secondary-button" onClick={downloadSeasonMagnets} disabled={checking || !episodes.length}><Icon name="down" size={15} /> Download .txt</button>
                 <button className="primary-button" onClick={checkSources} disabled={checking}>{checking ? <><span className="spinner spinner-dark" /> Scanning</> : <><Icon name="refresh" size={15} /> Check sources</>}</button>

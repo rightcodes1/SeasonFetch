@@ -24,12 +24,13 @@ For production, run `npm ci && npm run build && npm start`. Vercel uses `vercel.
 - Open or copy Stremio local download links (`127.0.0.1:11470`) and magnet links, plus open provider URLs when Torrentio returns one.
 - Live sources expose a tracker-enhanced magnet and a raw magnet fallback. Tracker values are encoded as `tr=udp%3A...` or `tr=http%3A...`; the info hash belongs only in `xt=urn:btih:...`.
 - Copy all available live season magnets at once or download them as a newline-separated `.txt` file for batch importing into a compatible downloader. Preview fallback rows are excluded.
+- Choose an account-free, browser-local Torrentio ranking preset: Default size + seeders, Smallest file, Most seeders, or Prefer 1337x.
 - Surface partial provider failures instead of presenting them as a successful scan.
 - Responsive desktop and mobile layouts.
 
 ## Torrentio integration
 
-The development command starts Vite on port 3000 and the Express provider proxy on port 3001. Vite forwards `/api` requests to the proxy. Search uses live Cinemeta, and selected series load their real season and episode metadata before scanning Torrentio. The proxy calls Torrentio with the Stremio series identifier format `tt...:season:episode`, limits season lookups to three concurrent requests, accepts valid 1080p sources only, preserves safe provider links and file indexes, and ranks results by smallest known file size first, highest known seeder count second, and 1337x only as a tie-breaker. If either provider is unavailable, the UI keeps working with clearly labeled local demo data where possible.
+The development command starts Vite on port 3000 and the Express provider proxy on port 3001. Vite forwards `/api` requests to the proxy. Search uses live Cinemeta, and selected series load their real season and episode metadata before scanning Torrentio. The proxy calls Torrentio with the Stremio series identifier format `tt...:season:episode`, limits season lookups to three concurrent requests, accepts valid 1080p sources only, preserves safe provider links and file indexes, and supports `default`, `smallest`, `seeders`, and `1337x` ranking preferences. The default ranks by smallest known file size first, highest known seeder count second, and 1337x only as a tie-breaker. If either provider is unavailable, the UI keeps working with clearly labeled local demo data where possible.
 
 Stremio download links use the local desktop server format `http://127.0.0.1:11470/<infoHash>/<fileIndex>?external=1&download=1`. They work only when Stremio Desktop is running with its local server available on the same computer as the browser; magnet links remain available as a fallback.
 
