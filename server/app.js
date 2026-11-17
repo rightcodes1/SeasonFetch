@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { searchSeries, getSeries } from "./services/cinemeta.js";
 import { getSeasonSources } from "./services/torrentio.js";
 import { explainSourceCandidates, geminiStatus, suggestSearchQueries } from "./services/gemini.js";
+import { requireUser, supabaseRequest, supabaseRpc } from "./services/supabaseAuth.js";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
@@ -39,6 +40,57 @@ app.get("/api/health", (_req, res) => {
 
 app.get("/api/gemini/status", (_req, res) => {
   res.json(geminiStatus());
+});
+
+async function requireAdmin(req, res, next) {
+  try {
+    const result = await supabaseRpc("is_admin", {}, req.supabaseToken);
+    if (result !== true) return res.status(403).json({ error: "Administrator access required." });
+    return next();
+  } catch (error) {
+    console.error("Admin authorization failed:", error.message);
+    return res.status(403).json({ error: "Administrator access required." });
+  }
+}
+
+app.get("/api/admin/users", requireUser, requireAdmin, async (req, res) => {
+  try {
+    const profiles = await supabaseRequest("profiles?select=id,username,display_name,bio,is_public,created_at,updated_at&order=created_at.desc", req.supabaseToken);
+    const suspensions = await supabaseRequest("account_suspensions?select=user_id,suspended,reason,suspended_by,suspended_at,updated_at", req.supabaseToken);
+    const byUser = new Map((suspensions || []).map(item => [item.user_id, item]));
+    return res.json({ users: (profiles || []).map(profile => ({ ...profile, suspension: byUser.get(profile.id) || null })) });
+  } catch (error) {
+    console.error("Admin user directory failed:", error.message);
+    return res.status(error.status || 502).json({ error: "Unable to load the user directory." });
+  }
+});
+
+app.post("/api/admin/users/:userId/suspension", requireUser, requireAdmin, async (req, res) => {
+  const { userId } = req.params;
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) return res.status(400).json({ error: "Invalid user ID." });
+  const shouldSuspend = req.body?.suspended === true;
+  try {
+    const suspension = await supabaseRpc("admin_set_user_suspension", {
+      target_user_id: userId,
+      should_suspend: shouldSuspend,
+      suspension_reason: String(req.body?.reason || "").slice(0, 500)
+    }, req.supabaseToken);
+    return res.json({ suspension });
+  } catch (error) {
+    console.error("Admin suspension action failed:", error.message);
+    return res.status(error.status === 42501 ? 403 : error.status || 502).json({ error: error.message || "Unable to update suspension." });
+  }
+});
+
+app.get("/api/admin/audit-logs", requireUser, requireAdmin, async (req, res) => {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+  try {
+    const logs = await supabaseRequest(`audit_logs?select=id,actor_id,action,target_user_id,metadata,created_at&order=created_at.desc&limit=${limit}`, req.supabaseToken);
+    return res.json({ logs: logs || [] });
+  } catch (error) {
+    console.error("Admin audit log lookup failed:", error.message);
+    return res.status(error.status || 502).json({ error: "Unable to load audit logs." });
+  }
 });
 
 app.post("/api/gemini/search-assist", async (req, res) => {

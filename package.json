@@ -19,6 +19,7 @@
     "dotenv": "latest",
     "express": "latest",
     "helmet": "latest",
+    "jose": "^6.2.17",
     "react": "latest",
     "react-dom": "latest",
     "vite": "latest"
