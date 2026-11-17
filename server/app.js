@@ -22,11 +22,12 @@ const allowedOrigins = new Set(
     .map(origin => origin.trim())
     .filter(Boolean)
 );
+const isSeasonFetchVercelOrigin = origin => /^https:\/\/season-fetch(?:-[a-z0-9-]+)?\.vercel\.app$/.test(origin);
 
 app.use(helmet({ frameguard: false }));
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+    if (!origin || allowedOrigins.has(origin) || isSeasonFetchVercelOrigin(origin)) return callback(null, true);
     return callback(new Error("Origin is not allowed by SeasonFetch."));
   }
 }));
