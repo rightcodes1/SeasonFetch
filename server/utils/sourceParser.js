@@ -103,7 +103,7 @@ export function normalizeStream(stream = {}) {
   const filename = stream.behaviorHints?.filename || "";
   const searchableText = [title, description, filename].join(" ");
   const englishDub = hasEnglishDub(searchableText);
-  const languageLabel = /dual[s._-]*audio/i.test(searchableText)
+  const languageLabel = /\bdual[\s._-]*audio\b/i.test(searchableText)
     ? "Dual Audio"
     : englishDub ? "English Dub" : null;
   const infoHash = String(stream.infoHash || "");
