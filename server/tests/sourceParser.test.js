@@ -23,7 +23,7 @@ test("selects the smallest known 1080p Torrentio source", () => {
   assert.equal(result.selected.infoHash, hashB);
 });
 
-test("prefers 1337x, then most seeders, then smallest known size", () => {
+test("prefers the smallest known size, then most seeders, then 1337x", () => {
   const result = selectBestSource([
     { title: "1080p WEB-DL 200 MB 👤 900 ⚙️ 1337x", infoHash: hashA },
     { title: "1080p WEB-DL 100 MB 👤 50 ⚙️ ThePirateBay", infoHash: hashB },
@@ -31,9 +31,19 @@ test("prefers 1337x, then most seeders, then smallest known size", () => {
   ]);
 
   assert.equal(parseSeeders("1080p WEB-DL 👤 1,234"), 1234);
-  assert.equal(result.selected.infoHash, hashA);
+  assert.equal(result.selected.infoHash, hashB);
+  assert.equal(result.selected.provider, null);
+  assert.equal(result.selected.seeders, 50);
+});
+
+test("uses 1337x only as a tie-breaker after size and seeders", () => {
+  const result = selectBestSource([
+    { title: "1080p WEB-DL 100 MB 👤 50 ⚙️ ThePirateBay", infoHash: hashA },
+    { title: "1080p WEB-DL 100 MB 👤 50 ⚙️ 1337x", infoHash: hashB }
+  ]);
+
+  assert.equal(result.selected.infoHash, hashB);
   assert.equal(result.selected.provider, "1337x");
-  assert.equal(result.selected.seeders, 900);
 });
 
 test("preserves safe source links and file selection in the normalized magnet", () => {

@@ -134,14 +134,14 @@ export function selectBestSource(streams = []) {
   const candidates = streams.map(normalizeStream).filter(Boolean);
 
   candidates.sort((a, b) => {
-    if (a.preferredProvider !== b.preferredProvider) return Number(b.preferredProvider) - Number(a.preferredProvider);
-    if (a.seeders === null && b.seeders !== null) return 1;
-    if (a.seeders !== null && b.seeders === null) return -1;
-    if (a.seeders !== b.seeders) return b.seeders - a.seeders;
     if (a.sizeBytes === null && b.sizeBytes === null) return 0;
     if (a.sizeBytes === null) return 1;
     if (b.sizeBytes === null) return -1;
-    return a.sizeBytes - b.sizeBytes;
+    if (a.sizeBytes !== b.sizeBytes) return a.sizeBytes - b.sizeBytes;
+    if (a.seeders === null && b.seeders !== null) return 1;
+    if (a.seeders !== null && b.seeders === null) return -1;
+    if (a.seeders !== b.seeders) return b.seeders - a.seeders;
+    return Number(b.preferredProvider) - Number(a.preferredProvider);
   });
 
   const selected = candidates[0] || null;

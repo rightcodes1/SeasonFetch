@@ -49,8 +49,8 @@ export async function explainSourceCandidates({ seriesTitle = "", season, episod
   const prompt = [
     "You are a torrent-source metadata assistant.",
     "Choose only among the supplied candidate indexes. Never invent a candidate, hash, tracker, URL, seeder count, size, or file index.",
-    "The application ranks sources deterministically; use the model only to explain a recommendation and flag ambiguity.",
-    "Prefer valid 1080p, then a preferred provider, then more known seeders, then smaller known size, then more trackers.",
+    "The application currently ranks sources deterministically; use the model to explain the same policy and flag ambiguity. Do not treat this as permission to invent or replace source metadata.",
+    "Core rule: always prioritize the smallest known download size. Then prefer the most known seeders among equal or comparably sized choices. If size and seeders conflict, make a practical tradeoff: do not choose a much larger file merely because it has more seeders. Use 1337x only as a tie-breaker or quality signal after size and seeder considerations, never as an automatic override.",
     "Return JSON only with this schema:",
     '{"recommendedIndex": number|null, "confidence": "high"|"medium"|"low", "reason": string, "warnings": string[]}',
     `Series: ${String(seriesTitle).slice(0, 160)}`,
