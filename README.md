@@ -37,3 +37,5 @@ If a Stremio link reports `ERR_CONNECTION_REFUSED`, first open `http://127.0.0.1
 Only live Torrentio results produce downloadable magnets. When Torrentio is unavailable, SeasonFetch may show clearly labeled preview rows, but it no longer exposes their placeholder hashes as magnets because those hashes cannot resolve metadata and would remain stuck on “querying info.”
 
 Set `TORRENTIO_BASE_URL`, `CINEMETA_BASE_URL`, or `CLIENT_ORIGIN` to override production defaults. The proxy exposes `GET /api/health`, `GET /api/cinemeta/search?q=title`, `GET /api/cinemeta/series/:id`, and `GET /api/torrentio/season/:seriesId/:season?episodes=1,2,3`.
+
+Gemini is an optional server-side helper. Set `GEMINI_API_KEY` as a sensitive Vercel environment variable for Preview and Production; never put it in GitHub or browser code. The optional `GET /api/gemini/status` route reports configuration without revealing the key, and `POST /api/gemini/explain-source` accepts candidate metadata for an explanation. Deterministic Torrentio ranking remains authoritative, and Gemini is not used to invent magnets, hashes, trackers, or file indexes.

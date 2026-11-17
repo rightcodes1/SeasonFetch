@@ -1,4 +1,4 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
@@ -6,6 +6,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { searchSeries, getSeries } from "./services/cinemeta.js";
 import { getSeasonSources } from "./services/torrentio.js";
+import { explainSourceCandidates, geminiStatus } from "./services/gemini.js";
+
+dotenv.config({ path: ".env.local" });
+dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -29,7 +33,21 @@ app.use(cors({
 app.use(express.json({ limit: "1mb" }));
 
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", application: "SeasonFetch", metadata: "Cinemeta", provider: "Torrentio" });
+  res.json({ status: "ok", application: "SeasonFetch", metadata: "Cinemeta", provider: "Torrentio", gemini: geminiStatus().configured ? "configured" : "optional-not-configured" });
+});
+
+app.get("/api/gemini/status", (_req, res) => {
+  res.json(geminiStatus());
+});
+
+app.post("/api/gemini/explain-source", async (req, res) => {
+  try {
+    const result = await explainSourceCandidates(req.body || {});
+    return res.json(result);
+  } catch (error) {
+    console.error("Gemini source explanation failed:", error.message);
+    return res.status(502).json({ error: "Gemini is unavailable or returned an invalid response." });
+  }
 });
 
 app.get("/api/cinemeta/search", async (req, res) => {
