@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { searchSeries, getSeries } from "./services/cinemeta.js";
 import { getSeasonSources } from "./services/torrentio.js";
-import { explainSourceCandidates, geminiStatus } from "./services/gemini.js";
+import { explainSourceCandidates, geminiStatus, suggestSearchQueries } from "./services/gemini.js";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
@@ -39,6 +39,15 @@ app.get("/api/health", (_req, res) => {
 
 app.get("/api/gemini/status", (_req, res) => {
   res.json(geminiStatus());
+});
+
+app.post("/api/gemini/search-assist", async (req, res) => {
+  try {
+    return res.json({ queries: await suggestSearchQueries(req.body?.query) });
+  } catch (error) {
+    console.error("Gemini search assist failed:", error.message);
+    return res.status(502).json({ error: "Gemini search assist is unavailable right now." });
+  }
 });
 
 app.post("/api/gemini/explain-source", async (req, res) => {

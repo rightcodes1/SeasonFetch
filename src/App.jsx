@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { cinemeta } from './services/cinemeta.js';
 import { torrentio } from './services/torrentio.js';
 
@@ -202,9 +202,72 @@ function App() {
   const [providerMode, setProviderMode] = useState('ready');
   const [geminiAnalysis, setGeminiAnalysis] = useState({});
   const [geminiLoading, setGeminiLoading] = useState({});
+  const [searchSuggestions, setSearchSuggestions] = useState([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
 
   const available = useMemo(() => episodes.filter(item => !['unavailable', 'provider-error'].includes(item.status)).length, [episodes]);
   const progress = episodes.length ? Math.round((available / episodes.length) * 100) : 0;
+
+  function decorateResults(items) {
+    return items.map((item, index) => {
+      const local = SERIES.find(candidate => candidate.imdbId === item.imdbId);
+      const title = item.title || local?.title || 'Unknown title';
+      return {
+        ...local,
+        ...item,
+        id: item.id,
+        imdbId: item.imdbId || item.id,
+        title,
+        accent: local?.accent || ['purple', 'orange', 'blue', 'red'][index % 4],
+        initials: local?.initials || title.split(/\s+/).slice(0, 2).map(word => word[0]).join('').toUpperCase(),
+        posterLabel: local?.posterLabel || 'Cinemeta metadata',
+        episodes: local?.episodes || {}
+      };
+    });
+  }
+
+  useEffect(() => {
+    const cleanQuery = query.trim();
+    if (cleanQuery.length < 2) {
+      setSearchSuggestions([]);
+      setSuggestionsLoading(false);
+      return undefined;
+    }
+
+    let active = true;
+    setSuggestionsLoading(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const data = await cinemeta.search(cleanQuery);
+        if (active) setSearchSuggestions(decorateResults(data.results || []).slice(0, 5));
+      } catch {
+        if (active) setSearchSuggestions([]);
+      } finally {
+        if (active) setSuggestionsLoading(false);
+      }
+    }, 280);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [query]);
+
+  async function searchWithGeminiAssist(cleanQuery) {
+    const response = await fetch('/api/gemini/search-assist', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: cleanQuery })
+    });
+    if (!response.ok) throw new Error('Gemini search assist failed');
+    const data = await response.json();
+    for (const suggestion of data.queries || []) {
+      const candidateData = await cinemeta.search(suggestion);
+      const candidateResults = decorateResults(candidateData.results || []);
+      if (candidateResults.length) return { results: candidateResults, correctedQuery: suggestion };
+    }
+    return { results: [], correctedQuery: '' };
+  }
 
   function runSearch(event, overrideQuery) {
     event?.preventDefault();
@@ -212,6 +275,7 @@ function App() {
     setSearchTouched(true);
     setSearching(true);
     setNotice(null);
+    setSearchSuggestions([]);
     setSelected(null);
     setEpisodes([]);
     setExpanded({});
@@ -225,24 +289,22 @@ function App() {
 
       try {
         const data = await cinemeta.search(cleanQuery);
-        const nextResults = (data.results || []).map((item, index) => {
-          const local = SERIES.find(candidate => candidate.imdbId === item.imdbId);
-          const title = item.title || local?.title || 'Unknown title';
-          return {
-            ...local,
-            ...item,
-            id: item.id,
-            imdbId: item.imdbId || item.id,
-            title,
-            accent: local?.accent || ['purple', 'orange', 'blue', 'red'][index % 4],
-            initials: local?.initials || title.split(/\s+/).slice(0, 2).map(word => word[0]).join('').toUpperCase(),
-            posterLabel: local?.posterLabel || 'Cinemeta metadata',
-            episodes: local?.episodes || {}
-          };
-        });
+        let nextResults = decorateResults(data.results || []);
+        let correctedQuery = '';
+        if (!nextResults.length) {
+          try {
+            const assisted = await searchWithGeminiAssist(cleanQuery);
+            nextResults = assisted.results;
+            correctedQuery = assisted.correctedQuery;
+          } catch (assistError) {
+            console.warn('Gemini search assist failed:', assistError);
+          }
+        }
         setResults(nextResults);
+        setSearchSuggestions(nextResults.slice(0, 5));
         setSearching(false);
-        if (!nextResults.length) setNotice('No series found. Try another title.');
+        if (correctedQuery) setNotice(`Gemini search assist matched “${correctedQuery}”.`);
+        else if (!nextResults.length) setNotice('No series found. Try another title.');
       } catch (error) {
         console.warn('Cinemeta search failed; using local preview matches.', error);
         const fallback = SERIES.filter(item => `${item.title} ${item.type}`.toLowerCase().includes(cleanQuery));
@@ -268,6 +330,7 @@ function App() {
     };
     setSelected(baseSeries);
     setResults([]);
+    setSearchSuggestions([]);
     setNotice(null);
     setSeason(1);
     setEpisodes([]);
@@ -490,6 +553,7 @@ function App() {
     setEpisodes([]);
     setNotice(null);
     setExpanded({});
+    setSearchSuggestions([]);
     setSearchTouched(false);
     setProviderMode('ready');
   }
@@ -519,12 +583,20 @@ function App() {
           <p className="hero-copy">Discover clean, high-quality sources for every episode.<br className="desktop-only" /> Automatically prioritize the smallest known file size.</p>
           <form className="search-form" onSubmit={runSearch}>
             <Icon name="search" size={18} />
-            <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search a TV series..." aria-label="Search a TV series" />
+            <input value={query} onChange={event => { setQuery(event.target.value); setSearchTouched(false); }} placeholder="Search a TV series..." aria-label="Search a TV series" />
             {query && <button className="clear-search" type="button" onClick={() => setQuery('')} aria-label="Clear search"><Icon name="x" size={15} /></button>}
             <button className="search-button" disabled={searching} type="submit">
               {searching ? <span className="spinner" /> : <>Search <Icon name="arrow" size={15} /></>}
             </button>
           </form>
+          {(suggestionsLoading || searchSuggestions.length > 0) && query.trim().length >= 2 && <div className="search-suggestions" aria-label="Search suggestions">
+            {suggestionsLoading && <div className="suggestions-loading"><span className="spinner spinner-dark" /> Finding matching titles…</div>}
+            {!suggestionsLoading && searchSuggestions.map(series => <button className="suggestion-card" key={series.imdbId || series.id} type="button" onClick={() => { setSearchSuggestions([]); chooseSeries(series); }}>
+              <Poster series={series} />
+              <span className="suggestion-card-copy"><strong>{series.title}</strong><span>{series.year || 'Year unavailable'} <i /> {series.type || 'Series'}</span></span>
+              <span className="card-arrow"><Icon name="arrow" size={14} /></span>
+            </button>)}
+          </div>}
           <div className="search-hint"><span><Icon name="check" size={12} /> 1080p only</span><b>·</b><span><Icon name="trend" size={12} /> Smallest known size</span><b>·</b><span><Icon name="link" size={12} /> Magnet links</span></div>
         </section>
 
