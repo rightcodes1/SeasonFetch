@@ -124,9 +124,9 @@ const SERIES = [
 
 const STREMIO_DOWNLOAD_ORIGIN = 'http://127.0.0.1:11470';
 const TORRENTIO_PREFERENCES = [
-  { value: 'default', label: 'Default · size + seeders' },
-  { value: 'smallest', label: 'Smallest file' },
-  { value: 'seeders', label: 'Most seeders' },
+  { value: 'best-overall', label: 'Best Overall' },
+  { value: 'smallest-acceptable', label: 'Smallest Acceptable' },
+  { value: 'most-reliable', label: 'Most Reliable' },
   { value: '1337x', label: 'Prefer 1337x' },
   { value: 'balanced', label: 'Balanced' },
   { value: 'quality', label: 'Highest quality' }
@@ -546,6 +546,9 @@ function App() {
         provider: source?.provider || '',
         seeders: source?.seeders ?? null,
         audio: source?.audio || null,
+        audioEvidence: source?.audioEvidence || 'unverified',
+        selectionReason: provider?.selectionReason || '',
+        releaseType: source?.releaseType || null,
         sourceCount: provider?.sources?.length || 0,
         sourceError: provider?.error || '',
         candidates: provider?.sources || []

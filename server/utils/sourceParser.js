@@ -85,6 +85,14 @@ function detectAudio(text = "") {
   return null;
 }
 
+function detectReleaseType(text = "") {
+  const normalized = String(text).toLowerCase().replace(/[._-]+/g, " ");
+  if (/\bweb\s*dl\b|\bwebdl\b|\bweb rip\b/.test(normalized)) return "WEB-DL";
+  if (/\bblu\s*ray\b|\bbluray\b|\bbdrip\b/.test(normalized)) return "BluRay";
+  if (/\bhdtv\b/.test(normalized)) return "HDTV";
+  return null;
+}
+
 function normalizeLink(value) {
   if (!value) return null;
 
@@ -158,7 +166,12 @@ export function normalizeStream(stream = {}) {
     resolution: detectResolution(searchableText),
     codec: detectCodec(searchableText),
     hdr: detectHdr(searchableText),
-    audio: detectAudio(searchableText)
+    audio: detectAudio(searchableText),
+    audioEvidence: detectAudio(searchableText) === "english-dubbed"
+      ? "explicit-english-dub"
+      : /\bdual\s+audio\b/i.test(searchableText) ? "possible-english-audio" : "unverified",
+    releaseType: detectReleaseType(searchableText),
+    metadataCompleteness: [sizeBytes, seeders, fileIdx, detectResolution(searchableText), detectCodec(searchableText), detectReleaseType(searchableText)].filter(value => value !== null && value !== undefined).length
   };
 }
 
@@ -175,7 +188,8 @@ export function selectBestSource(streams = [], preference = "default", audioMode
   }).filter(candidate => audioMode !== "english-dubbed-or-dual"
     || candidate.audio === "english-dubbed"
     || candidate.audio === "dual-audio");
-  const mode = ["default", "smallest", "seeders", "1337x", "balanced", "quality"].includes(preference) ? preference : "default";
+  const aliases = { "best-overall": "balanced", "smallest-acceptable": "smallest", "most-reliable": "seeders" };
+  const mode = ["default", "smallest", "seeders", "1337x", "balanced", "quality"].includes(aliases[preference] || preference) ? (aliases[preference] || preference) : "default";
   const qualityScore = candidate => (candidate.resolution === "2160p" ? 4 : candidate.resolution === "1440p" ? 3 : candidate.resolution === "1080p" ? 2 : candidate.resolution === "720p" ? 1 : 0) + (candidate.hdr ? 0.35 : 0) + (candidate.codec === "HEVC" || candidate.codec === "AV1" ? 0.2 : 0);
 
   candidates.sort((a, b) => {
@@ -220,10 +234,17 @@ export function selectBestSource(streams = [], preference = "default", audioMode
   });
 
   const selected = candidates[0] || null;
+  const selectionReason = selected ? [
+    selected.resolution ? `${selected.resolution} requirement` : "available resolution metadata",
+    selected.sizeBytes === null ? "size unknown" : `${selected.sizeLabel} known size`,
+    selected.seeders === null ? "seeder count unknown" : `${selected.seeders} seeders`,
+    selected.audioEvidence === "explicit-english-dub" ? "explicit English Dub metadata" : selected.audioEvidence === "possible-english-audio" ? "possible English audio metadata" : "audio language unverified"
+  ].join(", ") : "No source met the active hard filters.";
 
   return {
     selected,
     candidates,
+    selectionReason,
     status: !selected ? "unavailable" : selected.sizeBytes === null ? "size-unknown" : "selected"
   };
 }

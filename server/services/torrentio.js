@@ -70,12 +70,24 @@ export async function getSeasonSources(seriesId, season, episodeNumbers, prefere
 
   const providerErrors = results.filter(result => result.status === "error").length;
   const available = results.filter(result => result.selected).length;
+  const selected = results.map(result => result.selected).filter(Boolean);
+  const resolutions = [...new Set(selected.map(source => source.resolution).filter(Boolean))];
+  const audioEvidence = [...new Set(selected.map(source => source.audioEvidence).filter(Boolean))];
+  const totalSizeBytes = selected.reduce((total, source) => total + (source.sizeBytes || 0), 0);
 
   return {
     requestedEpisodes,
     results,
     available,
     providerErrors,
+    integrity: {
+      usableEpisodes: available,
+      missingEpisodes: requestedEpisodes.filter(episode => !results.find(result => result.episode === episode)?.selected),
+      resolutionConsistency: resolutions.length === 1 ? resolutions[0] : resolutions.length ? "mixed" : "unknown",
+      audioConsistency: audioEvidence.length === 1 ? audioEvidence[0] : audioEvidence.length ? "mixed" : "unknown",
+      estimatedTotalSizeBytes: totalSizeBytes || null,
+      weakEpisodes: results.filter(result => result.selected && (result.selected.seeders === null || result.selected.sizeBytes === null)).map(result => result.episode)
+    },
     status: providerErrors === results.length && results.length ? "error" : providerErrors ? "partial" : "live"
   };
 }
