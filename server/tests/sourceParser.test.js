@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { has1080p, normalizeStream, parseSeeders, selectBestSource } from "../utils/sourceParser.js";
+import { has1080p, hasEnglishDub, normalizeStream, parseSeeders, selectBestSource } from "../utils/sourceParser.js";
 
 const hashA = "a".repeat(40);
 const hashB = "b".repeat(40);
@@ -89,4 +89,43 @@ test("adds valid fallback trackers without putting the hash in a tracker paramet
   assert.match(result.magnet, /tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce/);
   assert.doesNotMatch(result.magnet, /tr=.*bbbb/);
   assert.doesNotMatch(result.rawMagnet, /tr=/);
+});
+
+test("detects explicit English-dub and dual-audio release labels", () => {
+  assert.equal(hasEnglishDub("Show S01E01 1080p ENG DUB"), true);
+  assert.equal(hasEnglishDub("Show S01E01 1080p English Dub"), true);
+  assert.equal(hasEnglishDub("Show S01E01 1080p Dual Audio"), true);
+  assert.equal(hasEnglishDub("Show S01E01 1080p WEB-DL"), false);
+  assert.equal(hasEnglishDub("Show S01E01 1080p English subtitles"), false);
+  assert.equal(hasEnglishDub("Show S01E01 1080p No English Dub"), false);
+});
+
+test("detects English-dub metadata in Torrentio descriptions and filenames", () => {
+  const fromDescription = normalizeStream({
+    title: "Show S01E01 1080p WEB-DL 1 GB",
+    description: "English Dub",
+    infoHash: hashA
+  });
+  const fromFilename = normalizeStream({
+    title: "Show S01E01 1080p WEB-DL 1 GB",
+    behaviorHints: { filename: "Show.S01E01.1080p.DUAL.AUDIO.mkv" },
+    infoHash: hashB
+  });
+
+  assert.equal(fromDescription.englishDub, true);
+  assert.equal(fromDescription.languageLabel, "English Dub");
+  assert.equal(fromFilename.englishDub, true);
+  assert.equal(fromFilename.languageLabel, "Dual Audio");
+});
+
+test("English Dub Only filters before ranking and leaves default mode unchanged", () => {
+  const streams = [
+    { title: "Show 1080p WEB-DL 500 MB", infoHash: hashA },
+    { title: "Show 1080p ENG DUB 1.2 GB", infoHash: hashB }
+  ];
+
+  assert.equal(selectBestSource(streams).selected.infoHash, hashA);
+  const filtered = selectBestSource(streams, "default", { englishDubOnly: true });
+  assert.equal(filtered.selected.infoHash, hashB);
+  assert.equal(filtered.candidates.length, 1);
 });
