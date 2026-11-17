@@ -158,6 +158,14 @@ h1 span { color: #b28dfc; }
 .magnet-line button { flex: 0 0 auto; display: grid; place-items: center; border: 0; color: #a98bf2; background: transparent; }
 .mobile-status { display: none; }
 .detail-note { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; color: #a590d0; font-size: 10px; }
+.gemini-panel { margin-top: 14px; padding: 12px 13px; border: 1px solid #a98af52b; border-radius: 9px; background: linear-gradient(135deg, #191522, #121318); color: #aaa2b7; font-size: 11px; }
+.gemini-panel.is-error { border-color: #d8838e40; }
+.gemini-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.gemini-label { color: #b99aff; font: 9px 'DM Mono', monospace; letter-spacing: .8px; }
+.gemini-panel-heading strong { color: #d7c9fa; font-size: 10px; font-weight: 600; }
+.gemini-panel p { margin: 8px 0 0; line-height: 1.55; }
+.gemini-panel ul { margin: 8px 0 0; padding-left: 17px; color: #dcb46f; line-height: 1.5; }
+.gemini-panel small { display: block; margin-top: 9px; color: #756f7e; font-size: 9px; }
 .empty-source { display: flex; align-items: flex-start; gap: 9px; color: #d8838e; font-size: 12px; }
 .empty-source svg { margin-top: 5px; }
 .empty-source span { display: block; margin-top: 5px; color: #7f7888; font-size: 10px; }
@@ -223,6 +231,7 @@ h1 span { color: #b28dfc; }
   .episode-details { padding: 16px 14px 17px; }
   .detail-top { align-items: flex-start; flex-direction: column; }
   .detail-actions { width: 100%; justify-content: flex-start; }
+  .gemini-panel-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
   .pre-scan { align-items: flex-start; flex-wrap: wrap; }
   .pre-scan > div:nth-child(2) { flex: 1; }
   .text-action { margin: 0 0 0 45px; }

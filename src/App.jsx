@@ -200,6 +200,8 @@ function App() {
   const [toast, setToast] = useState('');
   const [searchTouched, setSearchTouched] = useState(false);
   const [providerMode, setProviderMode] = useState('ready');
+  const [geminiAnalysis, setGeminiAnalysis] = useState({});
+  const [geminiLoading, setGeminiLoading] = useState({});
 
   const available = useMemo(() => episodes.filter(item => !['unavailable', 'provider-error'].includes(item.status)).length, [episodes]);
   const progress = episodes.length ? Math.round((available / episodes.length) * 100) : 0;
@@ -450,6 +452,37 @@ function App() {
     window.setTimeout(() => setToast(''), 2400);
   }
 
+  async function analyzeWithGemini(item) {
+    if (!item?.id || item.preview) return;
+    setGeminiLoading(current => ({ ...current, [item.id]: true }));
+    setGeminiAnalysis(current => ({ ...current, [item.id]: null }));
+    const candidates = (item.candidates?.length ? item.candidates : [item]).map(candidate => ({
+      title: candidate.title || candidate.format || '',
+      provider: candidate.provider || '',
+      resolution: candidate.resolution || '1080p',
+      sizeBytes: candidate.sizeBytes ?? null,
+      seeders: candidate.seeders ?? null,
+      trackerCount: candidate.trackerCount || 0,
+      fileIdx: candidate.fileIdx ?? null,
+      preferredProvider: Boolean(candidate.preferredProvider)
+    }));
+
+    try {
+      const response = await fetch('/api/gemini/explain-source', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ seriesTitle: selected?.title, season, episode: item.number, candidates })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Gemini request failed');
+      setGeminiAnalysis(current => ({ ...current, [item.id]: data }));
+    } catch (error) {
+      setGeminiAnalysis(current => ({ ...current, [item.id]: { error: error.message } }));
+    } finally {
+      setGeminiLoading(current => ({ ...current, [item.id]: false }));
+    }
+  }
+
   function reset() {
     setQuery('');
     setResults([]);
@@ -566,10 +599,11 @@ function App() {
                   </div>
                   {expanded[item.id] && <div className="episode-details">
                     {item.magnet ? <>
-                      <div className="detail-top"><div><span className="detail-label">SELECTED SOURCE</span><strong>{item.format}</strong></div><div className="detail-actions">{item.sourceUrl && <a className="secondary-button small-button" href={item.sourceUrl} target="_blank" rel="noreferrer">Open source <Icon name="arrow" size={13} /></a>}{buildStremioDownloadLink(item) && <><button className="secondary-button small-button" onClick={checkStremioConnection}><Icon name="bolt" size={14} /> Check Stremio</button><a className="primary-button small-button" href={buildStremioDownloadLink(item)}>Open Stremio download <Icon name="arrow" size={13} /></a><button className="secondary-button small-button" onClick={() => copyStremioLink(item)}><Icon name="copy" size={14} /> Copy Stremio link</button></>}<a className="secondary-button small-button" href={item.magnet}>Open magnet <Icon name="link" size={13} /></a><button className="secondary-button small-button" onClick={() => copyMagnet(item.magnet)}><Icon name="copy" size={14} /> Copy magnet with trackers</button>{item.rawMagnet && <button className="secondary-button small-button" onClick={() => copyRawMagnet(item)}><Icon name="copy" size={14} /> Copy raw magnet</button>}</div></div>
+                      <div className="detail-top"><div><span className="detail-label">SELECTED SOURCE</span><strong>{item.format}</strong></div><div className="detail-actions">{item.sourceUrl && <a className="secondary-button small-button" href={item.sourceUrl} target="_blank" rel="noreferrer">Open source <Icon name="arrow" size={13} /></a>}{buildStremioDownloadLink(item) && <><button className="secondary-button small-button" onClick={checkStremioConnection}><Icon name="bolt" size={14} /> Check Stremio</button><a className="primary-button small-button" href={buildStremioDownloadLink(item)}>Open Stremio download <Icon name="arrow" size={13} /></a><button className="secondary-button small-button" onClick={() => copyStremioLink(item)}><Icon name="copy" size={14} /> Copy Stremio link</button></>}<a className="secondary-button small-button" href={item.magnet}>Open magnet <Icon name="link" size={13} /></a><button className="secondary-button small-button" onClick={() => copyMagnet(item.magnet)}><Icon name="copy" size={14} /> Copy magnet with trackers</button>{item.rawMagnet && <button className="secondary-button small-button" onClick={() => copyRawMagnet(item)}><Icon name="copy" size={14} /> Copy raw magnet</button>}<button className="secondary-button small-button" onClick={() => analyzeWithGemini(item)} disabled={geminiLoading[item.id]}><Icon name="bolt" size={14} /> {geminiLoading[item.id] ? 'Analyzing…' : 'Analyze with Gemini'}</button></div></div>
                       <div className="detail-meta"><span><b>Resolution</b>1080p</span><span><b>File size</b>{item.size}</span>{item.seeders !== null && <span><b>Seeders</b>{item.seeders.toLocaleString()}</span>}{item.provider && <span><b>Provider</b>{item.provider}</span>}<span><b>Info hash</b>{item.hash.slice(0, 12)}…</span>{item.fileIdx !== null && <span><b>File index</b>{item.fileIdx}</span>}{item.trackerCount > 0 && <span><b>Trackers</b>{item.trackerCount}</span>}</div>
                       <div className="magnet-line"><code>{item.magnet}</code><a href={item.magnet} aria-label="Open magnet">Open</a><button onClick={() => copyMagnet(item.magnet)} aria-label="Copy magnet"><Icon name="copy" size={14} /></button></div>
                       <p className="detail-note"><Icon name="bolt" size={13} /> {providerMode === 'live' ? `${item.fallbackTrackersUsed ? 'Torrentio returned no trackers, so fallback trackers were added. ' : ''}The tracker magnet is recommended; use the raw magnet if your downloader manages its own tracker/DHT settings.` : 'Preview source selected by smallest known size.'}</p>
+                      {geminiAnalysis[item.id] && <div className={`gemini-panel ${geminiAnalysis[item.id].error ? 'is-error' : ''}`}><div className="gemini-panel-heading"><span className="gemini-label">GEMINI ASSIST</span>{geminiAnalysis[item.id].confidence && <strong>{geminiAnalysis[item.id].confidence} confidence</strong>}</div>{geminiAnalysis[item.id].error ? <p>{geminiAnalysis[item.id].error}</p> : <><p>{geminiAnalysis[item.id].reason || 'No explanation returned.'}</p>{geminiAnalysis[item.id].warnings?.length > 0 && <ul>{geminiAnalysis[item.id].warnings.map((warning, index) => <li key={`${item.id}-warning-${index}`}>{warning}</li>)}</ul>}<small>Torrentio’s deterministic selection remains the download source.</small></>}</div>}
                     </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>{item.preview ? 'Preview data is not downloadable' : 'No valid 1080p source found'}</strong><span>{item.preview ? 'Torrentio was unavailable during this scan. Run Check sources again to retrieve a real magnet.' : (item.sourceError || 'Try again later — provider availability can change.')}</span></div></div>}
                   </div>}
                 </div>)}
