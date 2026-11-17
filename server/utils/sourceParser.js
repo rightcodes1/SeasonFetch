@@ -50,7 +50,7 @@ export function has1080p(text = "") {
 const ENGLISH_DUB_PATTERNS = [
   /\b(?:eng(?:lish)?[\s._-]*(?:dub(?:bed)?|audio)|(?:dub(?:bed)?|audio)[\s._-]*(?:eng|english))\b/i,
   /\bdubbed?\s+in\s+english\b/i,
-  /\bdual[\s._-]*audio\b/i
+  /\bdual[\s._-]*audio\b(?=[\s\S]{0,100}(?:\beng(?:lish)?\b|🇬🇧|🇺🇸|🇨🇦|🇦🇺|🇳🇿))|(?:\beng(?:lish)?\b|🇬🇧|🇺🇸|🇨🇦|🇦🇺|🇳🇿)[\s\S]{0,100}\bdual[\s._-]*audio\b/i
 ];
 
 export function hasEnglishDub(text = "") {
@@ -103,7 +103,7 @@ export function normalizeStream(stream = {}) {
   const filename = stream.behaviorHints?.filename || "";
   const searchableText = [title, description, filename].join(" ");
   const englishDub = hasEnglishDub(searchableText);
-  const languageLabel = /\bdual[\s._-]*audio\b/i.test(searchableText)
+  const languageLabel = /\bdual[\s._-]*audio\b/i.test(searchableText) && hasEnglishDub(searchableText)
     ? "Dual Audio"
     : englishDub ? "English Dub" : null;
   const infoHash = String(stream.infoHash || "");
