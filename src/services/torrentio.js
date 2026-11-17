@@ -7,8 +7,10 @@ async function request(path) {
 }
 
 export const torrentio = {
-  getSeasonSources(seriesId, season, episodeNumbers, preference = 'default', audioMode = 'any') {
+  getSeasonSources(seriesId, season, episodeNumbers, preference = 'default', audioMode = 'any', filters = {}) {
     const episodes = Array.isArray(episodeNumbers) ? episodeNumbers.join(",") : episodeNumbers;
-    return request(`/api/torrentio/season/${encodeURIComponent(seriesId)}/${season}?episodeList=${encodeURIComponent(episodes)}&preference=${encodeURIComponent(preference)}&audio=${encodeURIComponent(audioMode)}`);
+    const params = new URLSearchParams({ episodeList: episodes, preference, audio: audioMode });
+    Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== null && value !== "") params.set(key, String(value)); });
+    return request(`/api/torrentio/season/${encodeURIComponent(seriesId)}/${season}?${params.toString()}`);
   }
 };

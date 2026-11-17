@@ -127,7 +127,15 @@ const TORRENTIO_PREFERENCES = [
   { value: 'default', label: 'Default · size + seeders' },
   { value: 'smallest', label: 'Smallest file' },
   { value: 'seeders', label: 'Most seeders' },
-  { value: '1337x', label: 'Prefer 1337x' }
+  { value: '1337x', label: 'Prefer 1337x' },
+  { value: 'balanced', label: 'Balanced' },
+  { value: 'quality', label: 'Highest quality' }
+];
+const RESOLUTION_PREFERENCES = [
+  { value: '1080p', label: '1080p only' },
+  { value: '720p', label: '720p only' },
+  { value: '2160p', label: '4K only' },
+  { value: 'any', label: 'Any resolution' }
 ];
 const AUDIO_PREFERENCES = [
   { value: 'any', label: 'Any audio' },
@@ -232,6 +240,10 @@ function App() {
   const [audioPreference, setAudioPreference] = useState(() => {
     const stored = window.localStorage.getItem('seasonfetch:audio-preference');
     return AUDIO_PREFERENCES.some(option => option.value === stored) ? stored : 'any';
+  });
+  const [resolutionPreference, setResolutionPreference] = useState(() => {
+    const stored = window.localStorage.getItem('seasonfetch:resolution-preference');
+    return RESOLUTION_PREFERENCES.some(option => option.value === stored) ? stored : '1080p';
   });
 
   const available = useMemo(() => episodes.filter(item => !['unavailable', 'provider-error'].includes(item.status)).length, [episodes]);
@@ -461,6 +473,16 @@ function App() {
     setNotice(value === 'any' ? 'Audio filter cleared.' : 'Audio filter enabled. Run Check sources to scan English dubbed or dual-audio releases.');
   }
 
+  function changeResolutionPreference(value) {
+    scanRequestRef.current += 1;
+    setResolutionPreference(value);
+    window.localStorage.setItem('seasonfetch:resolution-preference', value);
+    setEpisodes([]);
+    setExpanded({});
+    setProviderMode('ready');
+    setNotice('Resolution filter changed. Run Check sources to scan with it.');
+  }
+
   function checkSources() {
     if (!selected) return;
     const requestId = ++scanRequestRef.current;
@@ -468,6 +490,7 @@ function App() {
     const scanSeason = season;
     const scanPreference = torrentioPreference;
     const scanAudioPreference = audioPreference;
+    const scanResolutionPreference = resolutionPreference;
     setChecking(true);
     setEpisodes([]);
     setExpanded({});
@@ -530,9 +553,9 @@ function App() {
     });
 
     window.setTimeout(() => {
-      torrentio.getSeasonSources(selected.imdbId, season, episodeNumbers, torrentioPreference, audioPreference)
+      torrentio.getSeasonSources(selected.imdbId, season, episodeNumbers, torrentioPreference, audioPreference, { resolution: scanResolutionPreference })
         .then(data => {
-          if (requestId !== scanRequestRef.current || selected?.imdbId !== scanSeriesId || season !== scanSeason || torrentioPreference !== scanPreference || audioPreference !== scanAudioPreference) return;
+          if (requestId !== scanRequestRef.current || selected?.imdbId !== scanSeriesId || season !== scanSeason || torrentioPreference !== scanPreference || audioPreference !== scanAudioPreference || resolutionPreference !== scanResolutionPreference) return;
           setEpisodes(mapProviderRows(data.results || []));
           setProviderMode(data.status === 'partial' ? 'partial' : data.status === 'error' ? 'error' : 'live');
           setChecking(false);
@@ -753,6 +776,7 @@ function App() {
                 <div className="select-wrap"><Icon name="filter" size={15} /><select value={season} onChange={event => { scanRequestRef.current += 1; setSeason(Number(event.target.value)); setEpisodes([]); setExpanded({}); setProviderMode('ready'); }} aria-label="Choose season">{seasonOptions.map(item => <option key={item} value={item}>{item === 0 ? 'Specials' : `Season ${item}`}</option>)}</select><Icon name="down" size={14} /></div>
                 <div className="select-wrap preference-wrap"><Icon name="trend" size={15} /><select value={torrentioPreference} onChange={event => changeTorrentioPreference(event.target.value)} aria-label="Choose Torrentio ranking preference">{TORRENTIO_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
                 <div className="select-wrap preference-wrap"><Icon name="link" size={15} /><select value={audioPreference} onChange={event => changeAudioPreference(event.target.value)} aria-label="Choose audio filter">{AUDIO_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
+                <div className="select-wrap preference-wrap"><Icon name="spark" size={15} /><select value={resolutionPreference} onChange={event => changeResolutionPreference(event.target.value)} aria-label="Choose resolution filter">{RESOLUTION_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
                 <button className="secondary-button" onClick={copySeasonMagnets} disabled={checking || !episodes.length}><Icon name="copy" size={15} /> Copy season magnets</button>
                 <button className="secondary-button" onClick={downloadSeasonMagnets} disabled={checking || !episodes.length}><Icon name="down" size={15} /> Download .txt</button>
                 <button className="primary-button" onClick={checkSources} disabled={checking}>{checking ? <><span className="spinner spinner-dark" /> Scanning</> : <><Icon name="refresh" size={15} /> Check sources</>}</button>

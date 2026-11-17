@@ -27,9 +27,9 @@ async function requestStreams(seriesId, season, episode) {
   return Array.isArray(data.streams) ? data.streams : [];
 }
 
-export async function getEpisodeSources(seriesId, season, episode, preference = "default", audioMode = "any") {
+export async function getEpisodeSources(seriesId, season, episode, preference = "default", audioMode = "any", filters = {}) {
   const streams = await requestStreams(seriesId, season, episode);
-  const result = selectBestSource(streams, preference, audioMode);
+  const result = selectBestSource(streams, preference, audioMode, filters);
 
   return {
     episode,
@@ -39,7 +39,7 @@ export async function getEpisodeSources(seriesId, season, episode, preference = 
   };
 }
 
-export async function getSeasonSources(seriesId, season, episodeNumbers, preference = "default", audioMode = "any") {
+export async function getSeasonSources(seriesId, season, episodeNumbers, preference = "default", audioMode = "any", filters = {}) {
   const requestedEpisodes = Array.isArray(episodeNumbers)
     ? episodeNumbers.filter(number => Number.isInteger(number) && number > 0).slice(0, 30)
     : Array.from({ length: Math.min(Math.max(Number(episodeNumbers) || 0, 0), 30) }, (_, index) => index + 1);
@@ -53,7 +53,7 @@ export async function getSeasonSources(seriesId, season, episodeNumbers, prefere
 
       const episode = requestedEpisodes[index];
       try {
-        results[index] = await getEpisodeSources(seriesId, season, episode, preference, audioMode);
+        results[index] = await getEpisodeSources(seriesId, season, episode, preference, audioMode, filters);
       } catch (error) {
         results[index] = {
           episode,

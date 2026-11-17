@@ -47,6 +47,26 @@ export function has1080p(text = "") {
   return /(^|[^a-zA-Z0-9])1080p($|[^a-zA-Z0-9])/i.test(String(text));
 }
 
+function detectResolution(text = "") {
+  const match = String(text).match(/(?:^|[^0-9])(2160p|1440p|1080p|720p|576p|480p)(?:$|[^0-9])/i);
+  return match ? match[1].toLowerCase() : null;
+}
+
+function detectCodec(text = "") {
+  const normalized = String(text).toLowerCase().replace(/[._-]+/g, " ");
+  if (/\b(?:av1)\b/.test(normalized)) return "AV1";
+  if (/\b(?:hevc|h ?265|x265)\b/.test(normalized)) return "HEVC";
+  if (/\b(?:avc|h ?264|x264)\b/.test(normalized)) return "H.264";
+  return null;
+}
+
+function detectHdr(text = "") {
+  const normalized = String(text).toLowerCase().replace(/[._-]+/g, " ");
+  if (/\bdolby\s+vision\b|\bdv\b/.test(normalized)) return "Dolby Vision";
+  if (/\bhdr10\+?\b|\bhdr\b/.test(normalized)) return "HDR";
+  return null;
+}
+
 export function parseSeeders(text = "") {
   const match = String(text).match(/(?:👤|seeders?|peers?)\s*[:=]?\s*(\d[\d,]*)/iu);
   return match ? Number(match[1].replace(/,/g, "")) : null;
@@ -100,7 +120,7 @@ export function normalizeStream(stream = {}) {
   const searchableText = [title, description, filename].join(" ");
   const infoHash = String(stream.infoHash || "");
 
-  if (!HASH_REGEX.test(infoHash) || !has1080p(searchableText)) return null;
+  if (!HASH_REGEX.test(infoHash)) return null;
 
   const parsedSize = parseSize(searchableText);
   const structuredSize = Number.isFinite(stream.size) && stream.size > 0 ? stream.size : null;
@@ -135,17 +155,28 @@ export function normalizeStream(stream = {}) {
     fallbackTrackersUsed,
     magnet: buildMagnet(normalizedHash, magnetOptions),
     rawMagnet: buildMagnet(normalizedHash, { ...magnetOptions, includeTrackers: false }),
-    resolution: "1080p",
+    resolution: detectResolution(searchableText),
+    codec: detectCodec(searchableText),
+    hdr: detectHdr(searchableText),
     audio: detectAudio(searchableText)
   };
 }
 
-export function selectBestSource(streams = [], preference = "default", audioMode = "any") {
+export function selectBestSource(streams = [], preference = "default", audioMode = "any", filters = {}) {
   const normalized = streams.map(normalizeStream).filter(Boolean);
-  const candidates = audioMode === "english-dubbed-or-dual"
-    ? normalized.filter(candidate => candidate.audio === "english-dubbed" || candidate.audio === "dual-audio")
-    : normalized;
-  const mode = ["default", "smallest", "seeders", "1337x"].includes(preference) ? preference : "default";
+  const requestedResolution = filters.resolution || "1080p";
+  const candidates = normalized.filter(candidate => {
+    if (requestedResolution !== "any" && candidate.resolution !== requestedResolution) return false;
+    if (Number.isFinite(filters.maxSizeBytes) && (candidate.sizeBytes === null || candidate.sizeBytes > filters.maxSizeBytes)) return false;
+    if (Number.isFinite(filters.minSeeders) && (candidate.seeders === null || candidate.seeders < filters.minSeeders)) return false;
+    if (filters.codec && candidate.codec !== filters.codec) return false;
+    if (filters.hdr && candidate.hdr !== filters.hdr) return false;
+    return true;
+  }).filter(candidate => audioMode !== "english-dubbed-or-dual"
+    || candidate.audio === "english-dubbed"
+    || candidate.audio === "dual-audio");
+  const mode = ["default", "smallest", "seeders", "1337x", "balanced", "quality"].includes(preference) ? preference : "default";
+  const qualityScore = candidate => (candidate.resolution === "2160p" ? 4 : candidate.resolution === "1440p" ? 3 : candidate.resolution === "1080p" ? 2 : candidate.resolution === "720p" ? 1 : 0) + (candidate.hdr ? 0.35 : 0) + (candidate.codec === "HEVC" || candidate.codec === "AV1" ? 0.2 : 0);
 
   candidates.sort((a, b) => {
     const compareSeeders = () => {
@@ -154,6 +185,18 @@ export function selectBestSource(streams = [], preference = "default", audioMode
       if (a.seeders !== b.seeders) return (b.seeders ?? -1) - (a.seeders ?? -1);
       return 0;
     };
+    if (mode === "quality" || mode === "balanced") {
+      const qualityOrder = qualityScore(b) - qualityScore(a);
+      if (qualityOrder) return qualityOrder;
+      if (mode === "quality") return compareSeeders() || Number(b.preferredProvider) - Number(a.preferredProvider);
+    }
+    if (mode === "balanced") {
+      const sizeScore = candidate => candidate.sizeBytes === null ? 0 : 1 / Math.max(candidate.sizeBytes, 1);
+      const seederScore = candidate => candidate.seeders === null ? 0 : Math.log10(candidate.seeders + 1);
+      const score = candidate => qualityScore(candidate) * 0.35 + sizeScore(candidate) * 1e9 * 0.30 + seederScore(candidate) * 0.25 + (candidate.preferredProvider ? 0.1 : 0);
+      const balancedOrder = score(b) - score(a);
+      if (balancedOrder) return balancedOrder;
+    }
     if (mode === "1337x" && a.preferredProvider !== b.preferredProvider) {
       return Number(b.preferredProvider) - Number(a.preferredProvider);
     }

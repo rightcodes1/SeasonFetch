@@ -79,6 +79,29 @@ test("filters to English dubbed or dual-audio sources only when requested", () =
   assert.equal(result.selected.audio, "english-dubbed");
 });
 
+test("extracts structured resolution, codec, HDR, and keeps ambiguous audio unknown", () => {
+  const result = normalizeStream({
+    title: "Show S01E01 2160p WEB-DL HEVC HDR10",
+    infoHash: hashA
+  });
+
+  assert.equal(result.resolution, "2160p");
+  assert.equal(result.codec, "HEVC");
+  assert.equal(result.hdr, "HDR");
+  assert.equal(result.audio, null);
+});
+
+test("applies hard resolution, size, seeder, and codec filters before ranking", () => {
+  const result = selectBestSource([
+    { title: "Show 1080p AVC 2 GB 👤 500", infoHash: hashA },
+    { title: "Show 1080p HEVC 700 MB 👤 100", infoHash: hashB },
+    { title: "Show 720p HEVC 300 MB 👤 900", infoHash: "c".repeat(40) }
+  ], "default", "any", { resolution: "1080p", maxSizeBytes: 1024 ** 3, minSeeders: 50, codec: "HEVC" });
+
+  assert.equal(result.selected.infoHash, hashB);
+  assert.equal(result.candidates.length, 1);
+});
+
 test("preserves safe source links and file selection in the normalized magnet", () => {
   const result = normalizeStream({
     name: "Torrentio",

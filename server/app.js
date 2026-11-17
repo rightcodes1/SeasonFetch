@@ -171,9 +171,18 @@ app.get("/api/torrentio/season/:seriesId/:season", async (req, res) => {
     ? parseEpisodeNumbers(explicitEpisodes)
     : parseEpisodeNumbers(explicitEpisodes, { numericMeansCount: true });
   const audioMode = ["any", "english-dubbed-or-dual"].includes(req.query.audio) ? req.query.audio : "any";
-  const preference = ["default", "smallest", "seeders", "1337x"].includes(req.query.preference)
+  const preference = ["default", "smallest", "seeders", "1337x", "balanced", "quality"].includes(req.query.preference)
     ? req.query.preference
     : "default";
+  const resolution = ["any", "480p", "576p", "720p", "1080p", "1440p", "2160p"].includes(req.query.resolution) ? req.query.resolution : "1080p";
+  const maxSizeGb = req.query.maxSizeGb === undefined || req.query.maxSizeGb === "" ? null : Number(req.query.maxSizeGb);
+  const minSeeders = req.query.minSeeders === undefined || req.query.minSeeders === "" ? null : Number(req.query.minSeeders);
+  const codec = ["H.264", "HEVC", "AV1"].includes(req.query.codec) ? req.query.codec : null;
+  const hdr = ["HDR", "Dolby Vision"].includes(req.query.hdr) ? req.query.hdr : null;
+  if ((maxSizeGb !== null && (!Number.isFinite(maxSizeGb) || maxSizeGb <= 0)) || (minSeeders !== null && (!Number.isInteger(minSeeders) || minSeeders < 0))) {
+    return res.status(400).json({ error: "Invalid size or seeder filter." });
+  }
+  const filters = { resolution, maxSizeBytes: maxSizeGb === null ? null : maxSizeGb * 1024 ** 3, minSeeders, codec, hdr };
 
   if (!/^tt\d+$/.test(seriesId)) {
     return res.status(400).json({ error: "Invalid series IMDb ID." });
@@ -188,8 +197,8 @@ app.get("/api/torrentio/season/:seriesId/:season", async (req, res) => {
   }
 
   try {
-    const scan = await getSeasonSources(seriesId, season, episodeNumbers, preference, audioMode);
-    return res.json({ provider: "torrentio", seriesId, season, audioMode, totalEpisodes: scan.results.length, ...scan });
+    const scan = await getSeasonSources(seriesId, season, episodeNumbers, preference, audioMode, filters);
+    return res.json({ provider: "torrentio", seriesId, season, audioMode, preference, filters, totalEpisodes: scan.results.length, ...scan });
   } catch (error) {
     console.error("Torrentio season lookup failed:", error.message);
     return res.status(502).json({ error: "Torrentio is unavailable right now." });
