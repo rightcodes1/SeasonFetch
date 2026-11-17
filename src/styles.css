@@ -300,3 +300,27 @@ h1 span { color: #b28dfc; }
   .account-panel { padding: 27px 21px 23px; }
   .account-links { flex-direction: column; }
 }
+
+.account-menu { display: flex; align-items: center; gap: 6px; }
+.admin-trigger { min-height: 29px; padding: 4px 7px; border: 1px solid #e5b96a66; border-radius: 6px; color: #edc783; background: #e5b96a12; font: 700 9px 'DM Mono', monospace; letter-spacing: .4px; }
+.admin-trigger:hover { border-color: #e5b96aaa; background: #e5b96a22; }
+.admin-overlay { position: fixed; z-index: 21; inset: 0; display: grid; place-items: center; padding: 20px; background: #050507c7; backdrop-filter: blur(9px); }
+.admin-panel { position: relative; width: min(930px, 100%); max-height: min(760px, calc(100vh - 40px)); overflow: auto; padding: 31px; border: 1px solid #a98af54a; border-radius: 17px; background: linear-gradient(145deg, #1b1924, #111217); box-shadow: 0 28px 90px #00000075; }
+.admin-heading { display: flex; justify-content: space-between; gap: 30px; }
+.admin-heading h2 { margin: 9px 0 7px; color: #f3eff8; font: 600 29px 'Space Grotesk', sans-serif; letter-spacing: -1.1px; }
+.admin-heading p { max-width: 570px; margin: 0; color: #97919f; font-size: 11px; line-height: 1.55; }
+.admin-status { display: flex; align-items: center; gap: 8px; margin: 24px 0 15px; padding: 11px 13px; border: 1px solid #7bd29b2d; border-radius: 8px; color: #a8dbb8; background: #2a704014; font-size: 10px; }
+.admin-status span:last-child { margin-left: auto; color: #807b88; font-family: 'DM Mono', monospace; }
+.admin-status-dot { width: 6px; height: 6px; border-radius: 50%; background: #83d5a2; box-shadow: 0 0 9px #83d5a2; }
+.admin-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.admin-card { padding: 17px; border: 1px solid #ffffff12; border-radius: 11px; background: #17181d; }
+.admin-card h3 { margin: 8px 0 6px; color: #e9e4ef; font: 600 16px 'Space Grotesk', sans-serif; }
+.admin-card p { min-height: 35px; margin: 0 0 14px; color: #8d8796; font-size: 10px; line-height: 1.55; }
+.admin-card .secondary-button { min-height: 33px; padding: 8px 10px; font-size: 10px; }
+.admin-note { margin: 17px 0 0; color: #746e7e; font-size: 10px; line-height: 1.5; }
+@media (max-width: 650px) {
+  .admin-panel { padding: 25px 18px 20px; }
+  .admin-grid { grid-template-columns: 1fr; }
+  .admin-status { align-items: flex-start; flex-wrap: wrap; }
+  .admin-status span:last-child { width: 100%; margin-left: 14px; }
+}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { cinemeta } from './services/cinemeta.js';
 import { torrentio } from './services/torrentio.js';
 import AuthPanel from './components/AuthPanel.jsx';
+import AdminDashboard from './components/AdminDashboard.jsx';
 import { supabase } from './services/supabase.js';
 
 const SERIES = [
@@ -215,6 +216,8 @@ function App() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [torrentioPreference, setTorrentioPreference] = useState(() => {
     const stored = window.localStorage.getItem('seasonfetch:torrentio-preference');
     return TORRENTIO_PREFERENCES.some(option => option.value === stored) ? stored : 'default';
@@ -231,6 +234,7 @@ function App() {
     });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user || null);
+      if (!session) setIsAdmin(false);
       if (!session) setProfile(null);
     });
     return () => {
@@ -244,6 +248,15 @@ function App() {
     let active = true;
     supabase.from('profiles').select('*').eq('id', user.id).maybeSingle().then(({ data }) => {
       if (active) setProfile(data || null);
+    });
+    return () => { active = false; };
+  }, [user]);
+
+  useEffect(() => {
+    if (!supabase || !user) return undefined;
+    let active = true;
+    supabase.rpc('is_admin').then(({ data, error }) => {
+      if (active) setIsAdmin(!error && data === true);
     });
     return () => { active = false; };
   }, [user]);
@@ -627,7 +640,7 @@ function App() {
           <div className="topbar-right">
           <span className="live-indicator"><i /> Live discovery</span>
           <span className="topbar-label">TV SOURCE DISCOVERY</span>
-          {user ? <div className="account-menu"><button className="account-trigger" onClick={signOut} title="Sign out"><span className="account-avatar">{(profile?.display_name || user.email || 'U').slice(0, 1).toUpperCase()}</span><span>{profile?.display_name || user.email}</span></button></div> : <button className="account-trigger account-sign-in" onClick={() => setShowAuth(true)}>Sign in</button>}
+          {user ? <div className="account-menu">{isAdmin && <button className="admin-trigger" onClick={() => setShowAdmin(true)}>ADMIN</button>}<button className="account-trigger" onClick={signOut} title="Sign out"><span className="account-avatar">{(profile?.display_name || user.email || 'U').slice(0, 1).toUpperCase()}</span><span>{profile?.display_name || user.email}</span></button></div> : <button className="account-trigger account-sign-in" onClick={() => setShowAuth(true)}>Sign in</button>}
         </div>
       </header>
 
@@ -746,6 +759,7 @@ function App() {
       <footer className="footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Metadata: Cinemeta live <i /> Sources: Torrentio proxy <i /> 1080p normalized</span></footer>
       {toast && <div className="toast"><span className="toast-icon"><Icon name="check" size={14} /></span>{toast}</div>}
       {showAuth && supabase && <AuthPanel supabase={supabase} onClose={() => setShowAuth(false)} />}
+      {showAdmin && isAdmin && <AdminDashboard onClose={() => setShowAdmin(false)} />}
     </div>
   );
 }
