@@ -1,12 +1,23 @@
 const BASE_URL = (process.env.CINEMETA_BASE_URL || "https://v3-cinemeta.strem.io").replace(/\/+$/, "");
 
 async function requestJson(url) {
-  const response = await fetch(url, {
-    headers: { Accept: "application/json", "User-Agent": "SeasonFetch/1.0" },
-    signal: AbortSignal.timeout(15000)
-  });
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: { Accept: "application/json", "User-Agent": "SeasonFetch/1.0" },
+      signal: AbortSignal.timeout(15000)
+    });
+  } catch (error) {
+    const wrapped = new Error(error.name === "TimeoutError" ? "Cinemeta request timed out" : "Cinemeta request failed");
+    wrapped.statusCode = error.name === "TimeoutError" ? 504 : 502;
+    throw wrapped;
+  }
 
-  if (!response.ok) throw new Error(`Cinemeta returned HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(`Cinemeta returned HTTP ${response.status}`);
+    error.statusCode = response.status === 404 ? 404 : response.status >= 500 ? 502 : 502;
+    throw error;
+  }
   return response.json();
 }
 
@@ -73,7 +84,11 @@ function normalizeEpisodes(meta = {}) {
 export async function getSeries(id) {
   if (!/^tt\d+$/.test(id)) throw new Error("Invalid series IMDb ID");
   const data = await requestJson(`${BASE_URL}/meta/series/${encodeURIComponent(id)}.json`);
-  if (!data.meta) throw new Error("Series not found");
+  if (!data.meta) {
+    const error = new Error("Series not found");
+    error.statusCode = 404;
+    throw error;
+  }
 
   return {
     series: normalizeSeries(data.meta),

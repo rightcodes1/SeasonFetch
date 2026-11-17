@@ -57,6 +57,28 @@ test("supports most-seeders and prefer-1337x presets", () => {
   assert.equal(selectBestSource(streams, "unknown").selected.infoHash, hashA);
 });
 
+test("uses seeders when both source sizes are unknown", () => {
+  const result = selectBestSource([
+    { title: "1080p WEB-DL 👤 30", infoHash: hashA },
+    { title: "1080p WEB-DL 👤 600", infoHash: hashB }
+  ]);
+
+  assert.equal(result.status, "size-unknown");
+  assert.equal(result.selected.infoHash, hashB);
+});
+
+test("filters to English dubbed or dual-audio sources only when requested", () => {
+  const result = selectBestSource([
+    { title: "1080p WEB-DL 700 MB Japanese", infoHash: hashA },
+    { title: "1080p WEB-DL 1 GB English Dub", infoHash: hashB },
+    { title: "1080p WEB-DL 2 GB Dual Audio", infoHash: "c".repeat(40) }
+  ], "default", "english-dubbed-or-dual");
+
+  assert.equal(result.candidates.length, 2);
+  assert.equal(result.selected.infoHash, hashB);
+  assert.equal(result.selected.audio, "english-dubbed");
+});
+
 test("preserves safe source links and file selection in the normalized magnet", () => {
   const result = normalizeStream({
     name: "Torrentio",

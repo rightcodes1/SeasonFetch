@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { cinemeta } from './services/cinemeta.js';
 import { torrentio } from './services/torrentio.js';
 import AuthPanel from './components/AuthPanel.jsx';
@@ -129,11 +129,14 @@ const TORRENTIO_PREFERENCES = [
   { value: 'seeders', label: 'Most seeders' },
   { value: '1337x', label: 'Prefer 1337x' }
 ];
+const AUDIO_PREFERENCES = [
+  { value: 'any', label: 'Any audio' },
+  { value: 'english-dubbed-or-dual', label: 'English dubbed / dual audio' }
+];
 
 function buildStremioDownloadLink(item) {
-  if (!item?.hash) return '';
-  const fileIndex = Number.isInteger(item.fileIdx) && item.fileIdx >= 0 ? item.fileIdx : 0;
-  return `${STREMIO_DOWNLOAD_ORIGIN}/${encodeURIComponent(item.hash)}/${fileIndex}?external=1&download=1`;
+  if (!item?.hash || !Number.isInteger(item.fileIdx) || item.fileIdx < 0) return '';
+  return `${STREMIO_DOWNLOAD_ORIGIN}/${encodeURIComponent(item.hash)}/${item.fileIdx}?external=1&download=1`;
 }
 
 const ICONS = {
@@ -219,9 +222,16 @@ function App() {
   const [showAuth, setShowAuth] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const searchRequestRef = useRef(0);
+  const metadataRequestRef = useRef(0);
+  const scanRequestRef = useRef(0);
   const [torrentioPreference, setTorrentioPreference] = useState(() => {
     const stored = window.localStorage.getItem('seasonfetch:torrentio-preference');
     return TORRENTIO_PREFERENCES.some(option => option.value === stored) ? stored : 'default';
+  });
+  const [audioPreference, setAudioPreference] = useState(() => {
+    const stored = window.localStorage.getItem('seasonfetch:audio-preference');
+    return AUDIO_PREFERENCES.some(option => option.value === stored) ? stored : 'any';
   });
 
   const available = useMemo(() => episodes.filter(item => !['unavailable', 'provider-error'].includes(item.status)).length, [episodes]);
@@ -332,6 +342,7 @@ function App() {
   function runSearch(event, overrideQuery) {
     event?.preventDefault();
     const cleanQuery = String(overrideQuery ?? query).trim().toLowerCase();
+    const requestId = ++searchRequestRef.current;
     setSearchTouched(true);
     setSearching(true);
     setNotice(null);
@@ -341,6 +352,7 @@ function App() {
     setExpanded({});
     window.setTimeout(async () => {
       if (cleanQuery.length < 2) {
+        if (requestId !== searchRequestRef.current) return;
         setResults([]);
         setSearching(false);
         setNotice('Enter at least two characters to search.');
@@ -349,11 +361,13 @@ function App() {
 
       try {
         const data = await cinemeta.search(cleanQuery);
+        if (requestId !== searchRequestRef.current) return;
         let nextResults = decorateResults(data.results || []);
         let correctedQuery = '';
         if (!nextResults.length) {
           try {
             const assisted = await searchWithGeminiAssist(cleanQuery);
+            if (requestId !== searchRequestRef.current) return;
             nextResults = assisted.results;
             correctedQuery = assisted.correctedQuery;
           } catch (assistError) {
@@ -366,6 +380,7 @@ function App() {
         if (correctedQuery) setNotice(`Gemini search assist matched “${correctedQuery}”.`);
         else if (!nextResults.length) setNotice('No series found. Try another title.');
       } catch (error) {
+        if (requestId !== searchRequestRef.current) return;
         console.warn('Cinemeta search failed; using local preview matches.', error);
         const fallback = SERIES.filter(item => `${item.title} ${item.type}`.toLowerCase().includes(cleanQuery));
         setResults(fallback);
@@ -376,6 +391,8 @@ function App() {
   }
 
   async function chooseSeries(series) {
+    scanRequestRef.current += 1;
+    const requestId = ++metadataRequestRef.current;
     const local = SERIES.find(item => item.imdbId === series.imdbId || item.id === series.id);
     const baseSeasonCount = Number(series.seasons || local?.seasons || 1);
     const baseSeries = {
@@ -401,6 +418,7 @@ function App() {
 
     try {
       const data = await cinemeta.getSeries(baseSeries.imdbId);
+      if (requestId !== metadataRequestRef.current) return;
       const remoteEpisodes = Object.fromEntries(
         Object.entries(data.episodes || {}).map(([seasonNumber, list]) => [
           seasonNumber,
@@ -424,6 +442,7 @@ function App() {
   }
 
   function changeTorrentioPreference(value) {
+    scanRequestRef.current += 1;
     setTorrentioPreference(value);
     window.localStorage.setItem('seasonfetch:torrentio-preference', value);
     setEpisodes([]);
@@ -432,8 +451,23 @@ function App() {
     setNotice('Preference changed. Run Check sources to scan with it.');
   }
 
+  function changeAudioPreference(value) {
+    scanRequestRef.current += 1;
+    setAudioPreference(value);
+    window.localStorage.setItem('seasonfetch:audio-preference', value);
+    setEpisodes([]);
+    setExpanded({});
+    setProviderMode('ready');
+    setNotice(value === 'any' ? 'Audio filter cleared.' : 'Audio filter enabled. Run Check sources to scan English dubbed or dual-audio releases.');
+  }
+
   function checkSources() {
     if (!selected) return;
+    const requestId = ++scanRequestRef.current;
+    const scanSeriesId = selected.imdbId;
+    const scanSeason = season;
+    const scanPreference = torrentioPreference;
+    const scanAudioPreference = audioPreference;
     setChecking(true);
     setEpisodes([]);
     setExpanded({});
@@ -488,6 +522,7 @@ function App() {
         fallbackTrackersUsed: source?.fallbackTrackersUsed || false,
         provider: source?.provider || '',
         seeders: source?.seeders ?? null,
+        audio: source?.audio || null,
         sourceCount: provider?.sources?.length || 0,
         sourceError: provider?.error || '',
         candidates: provider?.sources || []
@@ -495,8 +530,9 @@ function App() {
     });
 
     window.setTimeout(() => {
-      torrentio.getSeasonSources(selected.imdbId, season, episodeNumbers, torrentioPreference)
+      torrentio.getSeasonSources(selected.imdbId, season, episodeNumbers, torrentioPreference, audioPreference)
         .then(data => {
+          if (requestId !== scanRequestRef.current || selected?.imdbId !== scanSeriesId || season !== scanSeason || torrentioPreference !== scanPreference || audioPreference !== scanAudioPreference) return;
           setEpisodes(mapProviderRows(data.results || []));
           setProviderMode(data.status === 'partial' ? 'partial' : data.status === 'error' ? 'error' : 'live');
           setChecking(false);
@@ -506,6 +542,7 @@ function App() {
           window.setTimeout(() => setToast(''), 2600);
         })
         .catch(error => {
+          if (requestId !== scanRequestRef.current || selected?.imdbId !== scanSeriesId || season !== scanSeason || torrentioPreference !== scanPreference || audioPreference !== scanAudioPreference) return;
           console.warn('Torrentio lookup failed; using preview data.', error);
           setEpisodes(makeDemoRows());
           setProviderMode('demo');
@@ -713,8 +750,9 @@ function App() {
             <div className="season-toolbar">
               <div><span className="section-kicker">EPISODE SOURCES</span><h2>Season results</h2></div>
               <div className="season-controls">
-                <div className="select-wrap"><Icon name="filter" size={15} /><select value={season} onChange={event => { setSeason(Number(event.target.value)); setEpisodes([]); setExpanded({}); setProviderMode('ready'); }} aria-label="Choose season">{seasonOptions.map(item => <option key={item} value={item}>{item === 0 ? 'Specials' : `Season ${item}`}</option>)}</select><Icon name="down" size={14} /></div>
+                <div className="select-wrap"><Icon name="filter" size={15} /><select value={season} onChange={event => { scanRequestRef.current += 1; setSeason(Number(event.target.value)); setEpisodes([]); setExpanded({}); setProviderMode('ready'); }} aria-label="Choose season">{seasonOptions.map(item => <option key={item} value={item}>{item === 0 ? 'Specials' : `Season ${item}`}</option>)}</select><Icon name="down" size={14} /></div>
                 <div className="select-wrap preference-wrap"><Icon name="trend" size={15} /><select value={torrentioPreference} onChange={event => changeTorrentioPreference(event.target.value)} aria-label="Choose Torrentio ranking preference">{TORRENTIO_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
+                <div className="select-wrap preference-wrap"><Icon name="link" size={15} /><select value={audioPreference} onChange={event => changeAudioPreference(event.target.value)} aria-label="Choose audio filter">{AUDIO_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
                 <button className="secondary-button" onClick={copySeasonMagnets} disabled={checking || !episodes.length}><Icon name="copy" size={15} /> Copy season magnets</button>
                 <button className="secondary-button" onClick={downloadSeasonMagnets} disabled={checking || !episodes.length}><Icon name="down" size={15} /> Download .txt</button>
                 <button className="primary-button" onClick={checkSources} disabled={checking}>{checking ? <><span className="spinner spinner-dark" /> Scanning</> : <><Icon name="refresh" size={15} /> Check sources</>}</button>
@@ -742,7 +780,7 @@ function App() {
                   {expanded[item.id] && <div className="episode-details">
                     {item.magnet ? <>
                       <div className="detail-top"><div><span className="detail-label">SELECTED SOURCE</span><strong>{item.format}</strong></div><div className="detail-actions">{item.sourceUrl && <a className="secondary-button small-button" href={item.sourceUrl} target="_blank" rel="noreferrer">Open source <Icon name="arrow" size={13} /></a>}{buildStremioDownloadLink(item) && <><button className="secondary-button small-button" onClick={checkStremioConnection}><Icon name="bolt" size={14} /> Check Stremio</button><a className="primary-button small-button" href={buildStremioDownloadLink(item)}>Open Stremio download <Icon name="arrow" size={13} /></a><button className="secondary-button small-button" onClick={() => copyStremioLink(item)}><Icon name="copy" size={14} /> Copy Stremio link</button></>}<a className="secondary-button small-button" href={item.magnet}>Open magnet <Icon name="link" size={13} /></a><button className="secondary-button small-button" onClick={() => copyMagnet(item.magnet)}><Icon name="copy" size={14} /> Copy magnet with trackers</button>{item.rawMagnet && <button className="secondary-button small-button" onClick={() => copyRawMagnet(item)}><Icon name="copy" size={14} /> Copy raw magnet</button>}<button className="secondary-button small-button" onClick={() => analyzeWithGemini(item)} disabled={geminiLoading[item.id]}><Icon name="bolt" size={14} /> {geminiLoading[item.id] ? 'Analyzing…' : 'Analyze with Gemini'}</button></div></div>
-                      <div className="detail-meta"><span><b>Resolution</b>1080p</span><span><b>File size</b>{item.size}</span>{item.seeders !== null && <span><b>Seeders</b>{item.seeders.toLocaleString()}</span>}{item.provider && <span><b>Provider</b>{item.provider}</span>}<span><b>Info hash</b>{item.hash.slice(0, 12)}…</span>{item.fileIdx !== null && <span><b>File index</b>{item.fileIdx}</span>}{item.trackerCount > 0 && <span><b>Trackers</b>{item.trackerCount}</span>}</div>
+                      <div className="detail-meta"><span><b>Resolution</b>1080p</span><span><b>File size</b>{item.size}</span>{item.audio && <span><b>Audio</b>{item.audio === 'dual-audio' ? 'Dual audio' : 'English dubbed'}</span>}{item.seeders !== null && <span><b>Seeders</b>{item.seeders.toLocaleString()}</span>}{item.provider && <span><b>Provider</b>{item.provider}</span>}<span><b>Info hash</b>{item.hash.slice(0, 12)}…</span>{item.fileIdx !== null && <span><b>File index</b>{item.fileIdx}</span>}{item.trackerCount > 0 && <span><b>Trackers</b>{item.trackerCount}</span>}</div>
                       <div className="magnet-line"><code>{item.magnet}</code><a href={item.magnet} aria-label="Open magnet">Open</a><button onClick={() => copyMagnet(item.magnet)} aria-label="Copy magnet"><Icon name="copy" size={14} /></button></div>
                       <p className="detail-note"><Icon name="bolt" size={13} /> {providerMode === 'live' ? `${item.fallbackTrackersUsed ? 'Torrentio returned no trackers, so fallback trackers were added. ' : ''}The tracker magnet is recommended; use the raw magnet if your downloader manages its own tracker/DHT settings.` : 'Preview source selected by smallest known size.'}</p>
                       {geminiAnalysis[item.id] && <div className={`gemini-panel ${geminiAnalysis[item.id].error ? 'is-error' : ''}`}><div className="gemini-panel-heading"><span className="gemini-label">GEMINI ASSIST</span>{(geminiAnalysis[item.id].recommendation?.confidence || geminiAnalysis[item.id].confidence) && <strong>{geminiAnalysis[item.id].recommendation?.confidence || geminiAnalysis[item.id].confidence} confidence</strong>}</div>{geminiAnalysis[item.id].error ? <p>{geminiAnalysis[item.id].error}</p> : <><p>{geminiAnalysis[item.id].recommendation?.reason || geminiAnalysis[item.id].reason || 'No explanation returned.'}</p>{(geminiAnalysis[item.id].recommendation?.warnings || geminiAnalysis[item.id].warnings)?.length > 0 && <ul>{(geminiAnalysis[item.id].recommendation?.warnings || geminiAnalysis[item.id].warnings).map((warning, index) => <li key={`${item.id}-warning-${index}`}>{warning}</li>)}</ul>}<small>Torrentio’s deterministic selection remains the download source.</small></>}</div>}

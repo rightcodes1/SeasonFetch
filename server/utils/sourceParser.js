@@ -56,6 +56,15 @@ function is1337x(text = "") {
   return /(?:^|[^a-z0-9])1337x(?:$|[^a-z0-9])/i.test(String(text));
 }
 
+function detectAudio(text = "") {
+  const normalized = String(text).toLowerCase().replace(/[._-]+/g, " ");
+  const dualAudio = /\bdual\s+audio\b|\bdual\s+audio\b/.test(normalized);
+  const englishDub = /\b(?:english|eng)\s+(?:dub|dubbed)\b|\b(?:dub|dubbed)\s+(?:english|eng)\b/.test(normalized);
+  if (dualAudio) return "dual-audio";
+  if (englishDub) return "english-dubbed";
+  return null;
+}
+
 function normalizeLink(value) {
   if (!value) return null;
 
@@ -126,31 +135,43 @@ export function normalizeStream(stream = {}) {
     fallbackTrackersUsed,
     magnet: buildMagnet(normalizedHash, magnetOptions),
     rawMagnet: buildMagnet(normalizedHash, { ...magnetOptions, includeTrackers: false }),
-    resolution: "1080p"
+    resolution: "1080p",
+    audio: detectAudio(searchableText)
   };
 }
 
-export function selectBestSource(streams = [], preference = "default") {
-  const candidates = streams.map(normalizeStream).filter(Boolean);
+export function selectBestSource(streams = [], preference = "default", audioMode = "any") {
+  const normalized = streams.map(normalizeStream).filter(Boolean);
+  const candidates = audioMode === "english-dubbed-or-dual"
+    ? normalized.filter(candidate => candidate.audio === "english-dubbed" || candidate.audio === "dual-audio")
+    : normalized;
   const mode = ["default", "smallest", "seeders", "1337x"].includes(preference) ? preference : "default";
 
   candidates.sort((a, b) => {
+    const compareSeeders = () => {
+      if (a.seeders === null && b.seeders !== null) return 1;
+      if (a.seeders !== null && b.seeders === null) return -1;
+      if (a.seeders !== b.seeders) return (b.seeders ?? -1) - (a.seeders ?? -1);
+      return 0;
+    };
     if (mode === "1337x" && a.preferredProvider !== b.preferredProvider) {
       return Number(b.preferredProvider) - Number(a.preferredProvider);
     }
     if (mode === "seeders") {
-      if (a.seeders === null && b.seeders !== null) return 1;
-      if (a.seeders !== null && b.seeders === null) return -1;
-      if (a.seeders !== b.seeders) return b.seeders - a.seeders;
+      const seederOrder = compareSeeders();
+      if (seederOrder) return seederOrder;
     }
-    if (a.sizeBytes === null && b.sizeBytes === null) return 0;
+    if (a.sizeBytes === null && b.sizeBytes === null) {
+      const seederOrder = compareSeeders();
+      if (seederOrder) return seederOrder;
+      return Number(b.preferredProvider) - Number(a.preferredProvider);
+    }
     if (a.sizeBytes === null) return 1;
     if (b.sizeBytes === null) return -1;
     if (a.sizeBytes !== b.sizeBytes) return a.sizeBytes - b.sizeBytes;
     if (mode !== "seeders") {
-      if (a.seeders === null && b.seeders !== null) return 1;
-      if (a.seeders !== null && b.seeders === null) return -1;
-      if (a.seeders !== b.seeders) return b.seeders - a.seeders;
+      const seederOrder = compareSeeders();
+      if (seederOrder) return seederOrder;
     }
     return Number(b.preferredProvider) - Number(a.preferredProvider);
   });

@@ -24,6 +24,17 @@ const allowedOrigins = new Set(
     .filter(Boolean)
 );
 const isSeasonFetchVercelOrigin = origin => /^https:\/\/season-fetch(?:-[a-z0-9-]+)?\.vercel\.app$/.test(origin);
+const geminiRateWindow = new Map();
+
+function rateLimitGemini(req, res, next) {
+  const key = req.ip || req.headers['x-forwarded-for'] || 'unknown';
+  const now = Date.now();
+  const recent = (geminiRateWindow.get(key) || []).filter(timestamp => now - timestamp < 60_000);
+  if (recent.length >= 20) return res.status(429).json({ error: 'Gemini request limit reached. Try again in a minute.' });
+  recent.push(now);
+  geminiRateWindow.set(key, recent);
+  return next();
+}
 
 app.use(helmet({ frameguard: false }));
 app.use(cors({
@@ -93,7 +104,10 @@ app.get("/api/admin/audit-logs", requireUser, requireAdmin, async (req, res) => 
   }
 });
 
-app.post("/api/gemini/search-assist", async (req, res) => {
+app.post("/api/gemini/search-assist", rateLimitGemini, async (req, res) => {
+  if (typeof req.body?.query !== "string" || req.body.query.trim().length < 2 || req.body.query.length > 200) {
+    return res.status(400).json({ error: "A search query between 2 and 200 characters is required." });
+  }
   try {
     return res.json({ queries: await suggestSearchQueries(req.body?.query) });
   } catch (error) {
@@ -102,7 +116,10 @@ app.post("/api/gemini/search-assist", async (req, res) => {
   }
 });
 
-app.post("/api/gemini/explain-source", async (req, res) => {
+app.post("/api/gemini/explain-source", rateLimitGemini, async (req, res) => {
+  if (!req.body || typeof req.body !== "object" || !Array.isArray(req.body.candidates) || req.body.candidates.length > 50) {
+    return res.status(400).json({ error: "A candidate list of up to 50 sources is required." });
+  }
   try {
     const result = await explainSourceCandidates(req.body || {});
     return res.json(result);
@@ -126,15 +143,15 @@ app.get("/api/cinemeta/series/:id", async (req, res) => {
     return res.json(await getSeries(req.params.id));
   } catch (error) {
     console.error("Cinemeta metadata failed:", error.message);
-    return res.status(404).json({ error: "Unable to retrieve that series." });
+    return res.status(error.statusCode || 502).json({ error: error.statusCode === 404 ? "Series not found." : "Cinemeta metadata is temporarily unavailable." });
   }
 });
 
-function parseEpisodeNumbers(value) {
+export function parseEpisodeNumbers(value, { numericMeansCount = false } = {}) {
   const raw = String(value ?? "").trim();
   if (!raw) return null;
 
-  if (/^\d+$/.test(raw)) {
+  if (/^\d+$/.test(raw) && numericMeansCount) {
     const count = Number(raw);
     return Number.isInteger(count) && count >= 1 && count <= 30
       ? Array.from({ length: count }, (_, index) => index + 1)
@@ -149,7 +166,11 @@ function parseEpisodeNumbers(value) {
 app.get("/api/torrentio/season/:seriesId/:season", async (req, res) => {
   const { seriesId } = req.params;
   const season = Number(req.params.season);
-  const episodeNumbers = parseEpisodeNumbers(req.query.episodes);
+  const explicitEpisodes = req.query.episodeList ?? req.query.episodes;
+  const episodeNumbers = req.query.episodeList
+    ? parseEpisodeNumbers(explicitEpisodes)
+    : parseEpisodeNumbers(explicitEpisodes, { numericMeansCount: true });
+  const audioMode = ["any", "english-dubbed-or-dual"].includes(req.query.audio) ? req.query.audio : "any";
   const preference = ["default", "smallest", "seeders", "1337x"].includes(req.query.preference)
     ? req.query.preference
     : "default";
@@ -167,8 +188,8 @@ app.get("/api/torrentio/season/:seriesId/:season", async (req, res) => {
   }
 
   try {
-    const scan = await getSeasonSources(seriesId, season, episodeNumbers, preference);
-    return res.json({ provider: "torrentio", seriesId, season, totalEpisodes: scan.results.length, ...scan });
+    const scan = await getSeasonSources(seriesId, season, episodeNumbers, preference, audioMode);
+    return res.json({ provider: "torrentio", seriesId, season, audioMode, totalEpisodes: scan.results.length, ...scan });
   } catch (error) {
     console.error("Torrentio season lookup failed:", error.message);
     return res.status(502).json({ error: "Torrentio is unavailable right now." });
