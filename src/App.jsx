@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { cinemeta } from './services/cinemeta.js';
 import { torrentio } from './services/torrentio.js';
+import AuthPanel from './components/AuthPanel.jsx';
+import { supabase } from './services/supabase.js';
 
 const SERIES = [
   {
@@ -210,6 +212,9 @@ function App() {
   const [geminiLoading, setGeminiLoading] = useState({});
   const [searchSuggestions, setSearchSuggestions] = useState([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [showAuth, setShowAuth] = useState(false);
   const [torrentioPreference, setTorrentioPreference] = useState(() => {
     const stored = window.localStorage.getItem('seasonfetch:torrentio-preference');
     return TORRENTIO_PREFERENCES.some(option => option.value === stored) ? stored : 'default';
@@ -217,6 +222,37 @@ function App() {
 
   const available = useMemo(() => episodes.filter(item => !['unavailable', 'provider-error'].includes(item.status)).length, [episodes]);
   const progress = episodes.length ? Math.round((available / episodes.length) * 100) : 0;
+
+  useEffect(() => {
+    if (!supabase) return undefined;
+    let active = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (active) setUser(data.session?.user || null);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+      if (!session) setProfile(null);
+    });
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!supabase || !user) return undefined;
+    let active = true;
+    supabase.from('profiles').select('*').eq('id', user.id).maybeSingle().then(({ data }) => {
+      if (active) setProfile(data || null);
+    });
+    return () => { active = false; };
+  }, [user]);
+
+  async function signOut() {
+    if (supabase) await supabase.auth.signOut();
+    setToast('Signed out');
+    window.setTimeout(() => setToast(''), 2200);
+  }
 
   function decorateResults(items) {
     return items.map((item, index) => {
@@ -588,10 +624,10 @@ function App() {
           <span className="brand-glyph"><span /></span>
           <span>Season<span className="accent-text">Fetch</span></span>
         </button>
-        <div className="topbar-right">
+          <div className="topbar-right">
           <span className="live-indicator"><i /> Live discovery</span>
           <span className="topbar-label">TV SOURCE DISCOVERY</span>
-          <button className="icon-button" aria-label="More options"><Icon name="dots" size={18} /></button>
+          {user ? <div className="account-menu"><button className="account-trigger" onClick={signOut} title="Sign out"><span className="account-avatar">{(profile?.display_name || user.email || 'U').slice(0, 1).toUpperCase()}</span><span>{profile?.display_name || user.email}</span></button></div> : <button className="account-trigger account-sign-in" onClick={() => setShowAuth(true)}>Sign in</button>}
         </div>
       </header>
 
@@ -709,6 +745,7 @@ function App() {
 
       <footer className="footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Metadata: Cinemeta live <i /> Sources: Torrentio proxy <i /> 1080p normalized</span></footer>
       {toast && <div className="toast"><span className="toast-icon"><Icon name="check" size={14} /></span>{toast}</div>}
+      {showAuth && supabase && <AuthPanel supabase={supabase} onClose={() => setShowAuth(false)} />}
     </div>
   );
 }

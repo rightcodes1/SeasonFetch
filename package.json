@@ -13,14 +13,14 @@
     "test": "node --test server/tests/*.test.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.119.0",
     "@vitejs/plugin-react": "latest",
     "cors": "latest",
     "dotenv": "latest",
     "express": "latest",
     "helmet": "latest",
-    "vite": "latest",
     "react": "latest",
-    "react-dom": "latest"
-  },
-  "devDependencies": {}
+    "react-dom": "latest",
+    "vite": "latest"
+  }
 }
