@@ -176,6 +176,13 @@ h1 span { color: #b28dfc; }
 .magnet-line button { flex: 0 0 auto; display: grid; place-items: center; border: 0; color: #a98bf2; background: transparent; }
 .mobile-status { display: none; }
 .detail-note { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; color: #a590d0; font-size: 10px; }
+.alternatives-panel { display: grid; gap: 8px; margin-top: 14px; padding: 12px; border: 1px solid #ffffff10; border-radius: 9px; background: #ffffff03; }
+.alternatives-heading { display: flex; justify-content: space-between; gap: 12px; color: #756f80; font-size: 9px; }
+.alternative-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 8px; border-top: 1px solid #ffffff0b; }
+.alternative-row > div { min-width: 0; display: grid; gap: 3px; }
+.alternative-row strong { overflow: hidden; color: #b4adbd; font-size: 10px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.alternative-row span { color: #77717e; font-size: 9px; }
+.alternative-row em { flex-shrink: 0; color: #8d80aa; font-size: 9px; font-style: normal; }
 .gemini-panel { margin-top: 14px; padding: 12px 13px; border: 1px solid #a98af52b; border-radius: 9px; background: linear-gradient(135deg, #191522, #121318); color: #aaa2b7; font-size: 11px; }
 .gemini-panel.is-error { border-color: #d8838e40; }
 .gemini-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }

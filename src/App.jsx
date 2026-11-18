@@ -227,8 +227,9 @@ function App() {
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [showAuth, setShowAuth] = useState(false);
-  const [authMode, setAuthMode] = useState('sign-in');
+  const recoveryLinkDetected = window.location.hash.includes('type=recovery') || new URLSearchParams(window.location.search).has('code');
+  const [showAuth, setShowAuth] = useState(recoveryLinkDetected);
+  const [authMode, setAuthMode] = useState(recoveryLinkDetected ? 'reset' : 'sign-in');
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const searchRequestRef = useRef(0);
@@ -257,13 +258,13 @@ function App() {
     supabase.auth.getSession().then(({ data }) => {
       if (active) setUser(data.session?.user || null);
     });
-    if (window.location.hash.includes('type=recovery')) {
+    if (recoveryLinkDetected) {
       setAuthMode('reset');
       setShowAuth(true);
     }
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user || null);
-      if (event === 'PASSWORD_RECOVERY') {
+      if (event === 'PASSWORD_RECOVERY' || (recoveryLinkDetected && event === 'SIGNED_IN')) {
         setAuthMode('reset');
         setShowAuth(true);
       }
@@ -828,6 +829,7 @@ function App() {
                       <div className="detail-meta"><span><b>Resolution</b>{item.resolution || 'Unknown'}</span><span><b>File size</b>{item.size}</span>{item.audio && <span><b>Audio</b>{item.audio === 'dual-audio' ? 'Dual audio' : 'English dubbed'}</span>}<span><b>Audio evidence</b>{item.audioEvidence === 'explicit-english-dub' ? 'Explicit English Dub' : item.audioEvidence === 'possible-english-audio' ? 'Possible English Audio' : 'Unverified'}</span>{item.releaseType && <span><b>Release</b>{item.releaseType}</span>}{item.seeders !== null && <span><b>Seeders</b>{item.seeders.toLocaleString()}</span>}{item.provider && <span><b>Provider</b>{item.provider}</span>}<span><b>Info hash</b>{item.hash.slice(0, 12)}…</span>{item.fileIdx !== null && <span><b>File index</b>{item.fileIdx}</span>}{item.trackerCount > 0 && <span><b>Trackers</b>{item.trackerCount}</span>}</div>
                       <div className="magnet-line"><code>{item.magnet}</code><a href={item.magnet} aria-label="Open magnet">Open</a><button onClick={() => copyMagnet(item.magnet)} aria-label="Copy magnet"><Icon name="copy" size={14} /></button></div>
                       <p className="detail-note"><Icon name="bolt" size={13} /> {item.selectionReason || (providerMode === 'live' ? `${item.fallbackTrackersUsed ? 'Torrentio returned no trackers, so fallback trackers were added. ' : ''}The tracker magnet is recommended; use the raw magnet if your downloader manages its own tracker/DHT settings.` : 'Preview source selected by smallest known size.')}</p>
+                      {item.candidates?.length > 1 && <div className="alternatives-panel"><div className="alternatives-heading"><span className="detail-label">TOP ALTERNATIVES</span><span>Compared after hard filters</span></div>{item.candidates.slice(1, 4).map((candidate, index) => <div className="alternative-row" key={`${item.id}-alternative-${candidate.infoHash || index}`}><div><strong>{candidate.title || 'Untitled release'}</strong><span>{candidate.resolution || 'Resolution unknown'} · {candidate.sizeLabel || 'Size unknown'} · {candidate.seeders === null ? 'Seeders unknown' : `${candidate.seeders.toLocaleString()} seeders`}</span></div><em>{candidate.audioEvidence === 'explicit-english-dub' ? 'Explicit English Dub' : candidate.audioEvidence === 'possible-english-audio' ? 'Possible English Audio' : 'Audio unverified'}</em></div>)}</div>}
                       {geminiAnalysis[item.id] && <div className={`gemini-panel ${geminiAnalysis[item.id].error ? 'is-error' : ''}`}><div className="gemini-panel-heading"><span className="gemini-label">GEMINI ASSIST</span>{(geminiAnalysis[item.id].recommendation?.confidence || geminiAnalysis[item.id].confidence) && <strong>{geminiAnalysis[item.id].recommendation?.confidence || geminiAnalysis[item.id].confidence} confidence</strong>}</div>{geminiAnalysis[item.id].error ? <p>{geminiAnalysis[item.id].error}</p> : <><p>{geminiAnalysis[item.id].recommendation?.reason || geminiAnalysis[item.id].reason || 'No explanation returned.'}</p>{(geminiAnalysis[item.id].recommendation?.warnings || geminiAnalysis[item.id].warnings)?.length > 0 && <ul>{(geminiAnalysis[item.id].recommendation?.warnings || geminiAnalysis[item.id].warnings).map((warning, index) => <li key={`${item.id}-warning-${index}`}>{warning}</li>)}</ul>}<small>Torrentio’s deterministic selection remains the download source.</small></>}</div>}
                     </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>{item.preview ? 'Preview data is not downloadable' : 'No valid 1080p source found'}</strong><span>{item.preview ? 'Torrentio was unavailable during this scan. Run Check sources again to retrieve a real magnet.' : (item.sourceError || 'Try again later — provider availability can change.')}</span></div></div>}
                   </div>}
@@ -842,7 +844,7 @@ function App() {
 
       <footer className="footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Metadata: Cinemeta live <i /> Sources: Torrentio proxy <i /> 1080p normalized</span></footer>
       {toast && <div className="toast"><span className="toast-icon"><Icon name="check" size={14} /></span>{toast}</div>}
-      {showAuth && supabase && <AuthPanel supabase={supabase} initialMode={authMode} onClose={() => { setShowAuth(false); setAuthMode('sign-in'); }} />}
+      {showAuth && supabase && <AuthPanel key={authMode} supabase={supabase} initialMode={authMode} onClose={() => { setShowAuth(false); setAuthMode('sign-in'); }} />}
       {showAdmin && isAdmin && <AdminDashboard supabase={supabase} onClose={() => setShowAdmin(false)} />}
     </div>
   );
