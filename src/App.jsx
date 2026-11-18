@@ -228,6 +228,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState('sign-in');
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const searchRequestRef = useRef(0);
@@ -256,8 +257,16 @@ function App() {
     supabase.auth.getSession().then(({ data }) => {
       if (active) setUser(data.session?.user || null);
     });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    if (window.location.hash.includes('type=recovery')) {
+      setAuthMode('reset');
+      setShowAuth(true);
+    }
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user || null);
+      if (event === 'PASSWORD_RECOVERY') {
+        setAuthMode('reset');
+        setShowAuth(true);
+      }
       if (!session) setIsAdmin(false);
       if (!session) setProfile(null);
     });
@@ -833,7 +842,7 @@ function App() {
 
       <footer className="footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Metadata: Cinemeta live <i /> Sources: Torrentio proxy <i /> 1080p normalized</span></footer>
       {toast && <div className="toast"><span className="toast-icon"><Icon name="check" size={14} /></span>{toast}</div>}
-      {showAuth && supabase && <AuthPanel supabase={supabase} onClose={() => setShowAuth(false)} />}
+      {showAuth && supabase && <AuthPanel supabase={supabase} initialMode={authMode} onClose={() => { setShowAuth(false); setAuthMode('sign-in'); }} />}
       {showAdmin && isAdmin && <AdminDashboard supabase={supabase} onClose={() => setShowAdmin(false)} />}
     </div>
   );
