@@ -245,6 +245,7 @@ function App() {
     const stored = window.localStorage.getItem('seasonfetch:resolution-preference');
     return RESOLUTION_PREFERENCES.some(option => option.value === stored) ? stored : '1080p';
   });
+  const [seasonIntegrity, setSeasonIntegrity] = useState(null);
 
   const available = useMemo(() => episodes.filter(item => !['unavailable', 'provider-error'].includes(item.status)).length, [episodes]);
   const progress = episodes.length ? Math.round((available / episodes.length) * 100) : 0;
@@ -493,6 +494,7 @@ function App() {
     const scanResolutionPreference = resolutionPreference;
     setChecking(true);
     setEpisodes([]);
+    setSeasonIntegrity(null);
     setExpanded({});
     setNotice(null);
     const baseRows = selected.episodes[season] || [];
@@ -544,6 +546,7 @@ function App() {
         trackerCount: source?.trackerCount || 0,
         fallbackTrackersUsed: source?.fallbackTrackersUsed || false,
         provider: source?.provider || '',
+        resolution: source?.resolution || null,
         seeders: source?.seeders ?? null,
         audio: source?.audio || null,
         audioEvidence: source?.audioEvidence || 'unverified',
@@ -560,6 +563,7 @@ function App() {
         .then(data => {
           if (requestId !== scanRequestRef.current || selected?.imdbId !== scanSeriesId || season !== scanSeason || torrentioPreference !== scanPreference || audioPreference !== scanAudioPreference || resolutionPreference !== scanResolutionPreference) return;
           setEpisodes(mapProviderRows(data.results || []));
+          setSeasonIntegrity(data.integrity || null);
           setProviderMode(data.status === 'partial' ? 'partial' : data.status === 'error' ? 'error' : 'live');
           setChecking(false);
           if (data.status === 'partial') setNotice(`${data.providerErrors} episode source request${data.providerErrors === 1 ? '' : 's'} failed; successful Torrentio results are still shown.`);
@@ -571,6 +575,7 @@ function App() {
           if (requestId !== scanRequestRef.current || selected?.imdbId !== scanSeriesId || season !== scanSeason || torrentioPreference !== scanPreference || audioPreference !== scanAudioPreference) return;
           console.warn('Torrentio lookup failed; using preview data.', error);
           setEpisodes(makeDemoRows());
+          setSeasonIntegrity(null);
           setProviderMode('demo');
           setChecking(false);
           setNotice('Torrentio is unavailable right now, so preview source data is shown instead.');
@@ -794,12 +799,16 @@ function App() {
                 <div className="summary-progress"><div className="progress-label"><span>Season coverage</span><b>{progress}%</b></div><div className="progress-track"><i style={{ width: `${progress}%` }} /></div></div>
                 <div className="summary-chip"><span className="chip-dot" /> {providerMode === 'live' ? 'Torrentio live · 1080p only' : providerMode === 'partial' ? 'Torrentio partial · retry failed rows' : providerMode === 'error' ? 'Torrentio error · retry scan' : providerMode === 'demo' ? 'Preview fallback · 1080p only' : '1080p filter active'}</div>
               </div>
+              {seasonIntegrity && <div className="integrity-panel">
+                <div><span className="section-kicker">SEASON INTEGRITY</span><strong>{seasonIntegrity.usableEpisodes} / {episodes.length} usable episodes</strong></div>
+                <div className="integrity-grid"><span><b>Missing</b>{seasonIntegrity.missingEpisodes?.length ? seasonIntegrity.missingEpisodes.map(number => `E${String(number).padStart(2, '0')}`).join(', ') : 'None'}</span><span><b>Resolution</b>{seasonIntegrity.resolutionConsistency || 'Unknown'}</span><span><b>Audio evidence</b>{seasonIntegrity.audioConsistency === 'explicit-english-dub' ? 'Explicit English Dub' : seasonIntegrity.audioConsistency === 'possible-english-audio' ? 'Possible English Audio' : seasonIntegrity.audioConsistency === 'mixed' ? 'Mixed' : 'Unverified'}</span><span><b>Estimated size</b>{seasonIntegrity.estimatedTotalSizeBytes ? `${(seasonIntegrity.estimatedTotalSizeBytes / 1024 ** 3).toFixed(2)} GB` : 'Unknown'}</span><span><b>Weak releases</b>{seasonIntegrity.weakEpisodes?.length ? seasonIntegrity.weakEpisodes.map(number => `E${String(number).padStart(2, '0')}`).join(', ') : 'None detected'}</span></div>
+              </div>}
               <div className="episode-table">
                 <div className="table-header"><span>EPISODE</span><span>SOURCE</span><span>FILE SIZE</span><span>STATUS</span><span /></div>
                 {episodes.map((item) => <div className="episode-group" key={item.id}>
                     <div className={`episode-row ${expanded[item.id] ? 'is-expanded' : ''}`}>
                     <button className="episode-name" onClick={() => setExpanded(current => ({ ...current, [item.id]: !current[item.id] }))}><span className="chevron"><Icon name={expanded[item.id] ? 'down' : 'chevron'} size={15} /></span><span className="episode-number">E{String(item.number).padStart(2, '0')}</span><span className="episode-title">{item.title}</span><span className={`mobile-status ${item.status}`} title={item.status === 'selected' ? 'Selected source' : item.status === 'size-unknown' ? 'Size unknown' : item.status === 'provider-error' ? 'Provider error' : 'Unavailable'}><Icon name={item.status === 'selected' ? 'check' : item.status === 'size-unknown' ? 'dots' : 'x'} size={12} /></span></button>
-                    <span className={`quality-pill ${['unavailable', 'provider-error'].includes(item.status) ? 'muted-pill' : ''}`}>{['unavailable', 'provider-error'].includes(item.status) ? '—' : '1080p'}</span>
+                    <span className={`quality-pill ${['unavailable', 'provider-error'].includes(item.status) ? 'muted-pill' : ''}`}>{['unavailable', 'provider-error'].includes(item.status) ? '—' : (item.resolution || resolutionPreference)}</span>
                     <span className="file-size">{item.size}</span>
                     <StatusBadge status={item.status} />
                     <span className="row-action">{item.magnet && <button className="copy-button" onClick={() => copyMagnet(item.magnet)} aria-label={`Copy magnet for episode ${item.number}`}><Icon name="copy" size={15} /></button>}</span>
@@ -807,9 +816,9 @@ function App() {
                   {expanded[item.id] && <div className="episode-details">
                     {item.magnet ? <>
                       <div className="detail-top"><div><span className="detail-label">SELECTED SOURCE</span><strong>{item.format}</strong></div><div className="detail-actions">{item.sourceUrl && <a className="secondary-button small-button" href={item.sourceUrl} target="_blank" rel="noreferrer">Open source <Icon name="arrow" size={13} /></a>}{buildStremioDownloadLink(item) && <><button className="secondary-button small-button" onClick={checkStremioConnection}><Icon name="bolt" size={14} /> Check Stremio</button><a className="primary-button small-button" href={buildStremioDownloadLink(item)}>Open Stremio download <Icon name="arrow" size={13} /></a><button className="secondary-button small-button" onClick={() => copyStremioLink(item)}><Icon name="copy" size={14} /> Copy Stremio link</button></>}<a className="secondary-button small-button" href={item.magnet}>Open magnet <Icon name="link" size={13} /></a><button className="secondary-button small-button" onClick={() => copyMagnet(item.magnet)}><Icon name="copy" size={14} /> Copy magnet with trackers</button>{item.rawMagnet && <button className="secondary-button small-button" onClick={() => copyRawMagnet(item)}><Icon name="copy" size={14} /> Copy raw magnet</button>}<button className="secondary-button small-button" onClick={() => analyzeWithGemini(item)} disabled={geminiLoading[item.id]}><Icon name="bolt" size={14} /> {geminiLoading[item.id] ? 'Analyzing…' : 'Analyze with Gemini'}</button></div></div>
-                      <div className="detail-meta"><span><b>Resolution</b>1080p</span><span><b>File size</b>{item.size}</span>{item.audio && <span><b>Audio</b>{item.audio === 'dual-audio' ? 'Dual audio' : 'English dubbed'}</span>}{item.seeders !== null && <span><b>Seeders</b>{item.seeders.toLocaleString()}</span>}{item.provider && <span><b>Provider</b>{item.provider}</span>}<span><b>Info hash</b>{item.hash.slice(0, 12)}…</span>{item.fileIdx !== null && <span><b>File index</b>{item.fileIdx}</span>}{item.trackerCount > 0 && <span><b>Trackers</b>{item.trackerCount}</span>}</div>
+                      <div className="detail-meta"><span><b>Resolution</b>{item.resolution || 'Unknown'}</span><span><b>File size</b>{item.size}</span>{item.audio && <span><b>Audio</b>{item.audio === 'dual-audio' ? 'Dual audio' : 'English dubbed'}</span>}<span><b>Audio evidence</b>{item.audioEvidence === 'explicit-english-dub' ? 'Explicit English Dub' : item.audioEvidence === 'possible-english-audio' ? 'Possible English Audio' : 'Unverified'}</span>{item.releaseType && <span><b>Release</b>{item.releaseType}</span>}{item.seeders !== null && <span><b>Seeders</b>{item.seeders.toLocaleString()}</span>}{item.provider && <span><b>Provider</b>{item.provider}</span>}<span><b>Info hash</b>{item.hash.slice(0, 12)}…</span>{item.fileIdx !== null && <span><b>File index</b>{item.fileIdx}</span>}{item.trackerCount > 0 && <span><b>Trackers</b>{item.trackerCount}</span>}</div>
                       <div className="magnet-line"><code>{item.magnet}</code><a href={item.magnet} aria-label="Open magnet">Open</a><button onClick={() => copyMagnet(item.magnet)} aria-label="Copy magnet"><Icon name="copy" size={14} /></button></div>
-                      <p className="detail-note"><Icon name="bolt" size={13} /> {providerMode === 'live' ? `${item.fallbackTrackersUsed ? 'Torrentio returned no trackers, so fallback trackers were added. ' : ''}The tracker magnet is recommended; use the raw magnet if your downloader manages its own tracker/DHT settings.` : 'Preview source selected by smallest known size.'}</p>
+                      <p className="detail-note"><Icon name="bolt" size={13} /> {item.selectionReason || (providerMode === 'live' ? `${item.fallbackTrackersUsed ? 'Torrentio returned no trackers, so fallback trackers were added. ' : ''}The tracker magnet is recommended; use the raw magnet if your downloader manages its own tracker/DHT settings.` : 'Preview source selected by smallest known size.')}</p>
                       {geminiAnalysis[item.id] && <div className={`gemini-panel ${geminiAnalysis[item.id].error ? 'is-error' : ''}`}><div className="gemini-panel-heading"><span className="gemini-label">GEMINI ASSIST</span>{(geminiAnalysis[item.id].recommendation?.confidence || geminiAnalysis[item.id].confidence) && <strong>{geminiAnalysis[item.id].recommendation?.confidence || geminiAnalysis[item.id].confidence} confidence</strong>}</div>{geminiAnalysis[item.id].error ? <p>{geminiAnalysis[item.id].error}</p> : <><p>{geminiAnalysis[item.id].recommendation?.reason || geminiAnalysis[item.id].reason || 'No explanation returned.'}</p>{(geminiAnalysis[item.id].recommendation?.warnings || geminiAnalysis[item.id].warnings)?.length > 0 && <ul>{(geminiAnalysis[item.id].recommendation?.warnings || geminiAnalysis[item.id].warnings).map((warning, index) => <li key={`${item.id}-warning-${index}`}>{warning}</li>)}</ul>}<small>Torrentio’s deterministic selection remains the download source.</small></>}</div>}
                     </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>{item.preview ? 'Preview data is not downloadable' : 'No valid 1080p source found'}</strong><span>{item.preview ? 'Torrentio was unavailable during this scan. Run Check sources again to retrieve a real magnet.' : (item.sourceError || 'Try again later — provider availability can change.')}</span></div></div>}
                   </div>}

@@ -57,6 +57,19 @@ test("supports most-seeders and prefer-1337x presets", () => {
   assert.equal(selectBestSource(streams, "unknown").selected.infoHash, hashA);
 });
 
+test("supports understandable recommendation outcomes and returns a selection reason", () => {
+  const streams = [
+    { title: "Show 1080p WEB-DL AVC 900 MB 👤 40", infoHash: hashA },
+    { title: "Show 1080p BluRay HEVC 1.2 GB 👤 600", infoHash: hashB }
+  ];
+
+  const result = selectBestSource(streams, "most-reliable");
+  assert.equal(result.selected.infoHash, hashB);
+  assert.match(result.selectionReason, /1080p requirement/);
+  assert.equal(result.selected.releaseType, "BluRay");
+  assert.equal(result.selected.audioEvidence, "unverified");
+});
+
 test("uses seeders when both source sizes are unknown", () => {
   const result = selectBestSource([
     { title: "1080p WEB-DL 👤 30", infoHash: hashA },
