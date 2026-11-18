@@ -101,6 +101,7 @@ app.get("/api/torrentio/season/:seriesId/:season", async (req, res) => {
   const preference = ["default", "smallest", "seeders", "1337x"].includes(req.query.preference)
     ? req.query.preference
     : "default";
+  const englishDubOnly = req.query.englishDubOnly === "true";
 
   if (!/^tt\d+$/.test(seriesId)) {
     return res.status(400).json({ error: "Invalid series IMDb ID." });
@@ -115,8 +116,8 @@ app.get("/api/torrentio/season/:seriesId/:season", async (req, res) => {
   }
 
   try {
-    const scan = await getSeasonSources(seriesId, season, episodeNumbers, preference);
-    return res.json({ provider: "torrentio", seriesId, season, totalEpisodes: scan.results.length, ...scan });
+    const scan = await getSeasonSources(seriesId, season, episodeNumbers, preference, englishDubOnly);
+    return res.json({ provider: "torrentio", seriesId, season, totalEpisodes: scan.results.length, filters: { englishDubOnly }, ...scan });
   } catch (error) {
     console.error("Torrentio season lookup failed:", error.message);
     return res.status(502).json({ error: "Torrentio is unavailable right now." });

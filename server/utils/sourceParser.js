@@ -47,6 +47,19 @@ export function has1080p(text = "") {
   return /(^|[^a-zA-Z0-9])1080p($|[^a-zA-Z0-9])/i.test(String(text));
 }
 
+const ENGLISH_DUB_PATTERNS = [
+  /\b(?:eng(?:lish)?[\s._-]*(?:dub(?:bed)?|audio)|(?:dub(?:bed)?|audio)[\s._-]*(?:eng|english))\b/i,
+  /\bdubbed?\s+in\s+english\b/i,
+  /\bdual[\s._-]*audio\b(?=[\s\S]{0,100}(?:\beng(?:lish)?\b|🇬🇧|🇺🇸|🇨🇦|🇦🇺|🇳🇿))|(?:\beng(?:lish)?\b|🇬🇧|🇺🇸|🇨🇦|🇦🇺|🇳🇿)[\s\S]{0,100}\bdual[\s._-]*audio\b/i
+];
+
+export function hasEnglishDub(text = "") {
+  const value = String(text);
+  const negative = /\b(?:no|not|without|non)[\s._-]+(?:(?:english|eng)[\s._-]*(?:dub(?:bed)?|audio)|dual[\s._-]*audio)\b/i;
+  if (negative.test(value)) return false;
+  return ENGLISH_DUB_PATTERNS.some(pattern => pattern.test(value));
+}
+
 export function parseSeeders(text = "") {
   const match = String(text).match(/(?:👤|seeders?|peers?)\s*[:=]?\s*(\d[\d,]*)/iu);
   return match ? Number(match[1].replace(/,/g, "")) : null;
@@ -89,6 +102,10 @@ export function normalizeStream(stream = {}) {
   const description = stream.description || "";
   const filename = stream.behaviorHints?.filename || "";
   const searchableText = [title, description, filename].join(" ");
+  const englishDub = hasEnglishDub(searchableText);
+  const languageLabel = /\bdual[\s._-]*audio\b/i.test(searchableText) && hasEnglishDub(searchableText)
+    ? "Dual Audio"
+    : englishDub ? "English Dub" : null;
   const infoHash = String(stream.infoHash || "");
 
   if (!HASH_REGEX.test(infoHash) || !has1080p(searchableText)) return null;
@@ -126,12 +143,17 @@ export function normalizeStream(stream = {}) {
     fallbackTrackersUsed,
     magnet: buildMagnet(normalizedHash, magnetOptions),
     rawMagnet: buildMagnet(normalizedHash, { ...magnetOptions, includeTrackers: false }),
-    resolution: "1080p"
+    resolution: "1080p",
+    englishDub,
+    languageLabel
   };
 }
 
-export function selectBestSource(streams = [], preference = "default") {
-  const candidates = streams.map(normalizeStream).filter(Boolean);
+export function selectBestSource(streams = [], preference = "default", { englishDubOnly = false } = {}) {
+  const candidates = streams
+    .map(normalizeStream)
+    .filter(Boolean)
+    .filter(source => !englishDubOnly || source.englishDub);
   const mode = ["default", "smallest", "seeders", "1337x"].includes(preference) ? preference : "default";
 
   candidates.sort((a, b) => {
