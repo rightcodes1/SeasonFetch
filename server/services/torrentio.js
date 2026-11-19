@@ -1,5 +1,5 @@
-import { selectBestSource } from "../utils/sourceParser.js";
 import { processTorrentioResults } from "../intelligence/providers/torrentioAdapter.js";
+import { recommendationProfileForPreference } from "../intelligence/pipeline.js";
 
 const BASE_URL = (process.env.TORRENTIO_BASE_URL || "https://torrentio.strem.fun").replace(/\/+$/, "");
 
@@ -30,26 +30,48 @@ async function requestStreams(seriesId, season, episode) {
 
 export async function getEpisodeSources(seriesId, season, episode, preference = "default", audioMode = "any", filters = {}) {
   const streams = await requestStreams(seriesId, season, episode);
-  const result = selectBestSource(streams, preference, audioMode, filters);
   const intelligence = processTorrentioResults(streams, {
     season,
     episode,
-    profile: preference === "best-overall" ? "best-overall" : preference === "smallest-acceptable" ? "smallest-acceptable" : preference === "most-reliable" ? "most-reliable" : "best-overall"
+    profile: recommendationProfileForPreference(preference),
+    filters,
+    audioMode
   });
+  const selectedRelease = intelligence.recommendations[recommendationKey(preference)] || intelligence.ranked[0] || null;
+  const selected = selectedRelease?.source || null;
+  const candidates = intelligence.ranked.map(release => release.source);
 
   return {
     episode,
-    status: result.status,
-    selected: result.selected,
-    sources: result.candidates,
+    status: selected ? selected.sizeBytes === null ? "size-unknown" : "selected" : "unavailable",
+    selected,
+    sources: candidates,
     intelligence: {
       validatedCount: intelligence.validated.length,
+      eligible: intelligence.eligible,
+      rejected: intelligence.rejected,
       duplicateGroupCount: intelligence.duplicateGroups.length,
       recommendations: intelligence.recommendations,
       ranked: intelligence.ranked
     },
-    selectionReason: result.selectionReason
+    selectionReason: selectedRelease ? selectionReason(selectedRelease) : "No source met the active hard filters."
   };
+}
+
+function recommendationKey(preference) {
+  if (["smallest", "smallest-acceptable", "default"].includes(preference)) return "smallestAcceptable";
+  if (["seeders", "most-reliable"].includes(preference)) return "mostReliable";
+  if (["quality", "highest-quality"].includes(preference)) return "highestQuality";
+  return "bestOverall";
+}
+
+function selectionReason(release) {
+  return [
+    release.resolution ? `${release.resolution} requirement` : "available resolution metadata",
+    release.sizeBytes === null ? "size unknown" : `${release.source.sizeLabel} known size`,
+    release.seeders === null ? "seeder count unknown" : `${release.seeders} seeders`,
+    release.audio.classification === "explicit-english-dub" ? "explicit English Dub metadata" : release.audio.classification === "possible-english-audio" ? "possible English audio metadata" : "audio language unverified"
+  ].join(", ");
 }
 
 export async function getSeasonSources(seriesId, season, episodeNumbers, preference = "default", audioMode = "any", filters = {}) {
