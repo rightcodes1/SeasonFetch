@@ -92,6 +92,17 @@ test("filters to English dubbed or dual-audio sources only when requested", () =
   assert.equal(result.selected.audio, "english-dubbed");
 });
 
+test("strict audio mode excludes dual-audio and unverified releases", () => {
+  const result = selectBestSource([
+    { title: "1080p WEB-DL 500 MB Dual Audio", infoHash: hashA },
+    { title: "1080p WEB-DL 700 MB English Dub", infoHash: hashB },
+    { title: "1080p WEB-DL 300 MB Japanese", infoHash: "c".repeat(40) }
+  ], "default", "english-dubbed-only");
+
+  assert.equal(result.candidates.length, 1);
+  assert.equal(result.selected.audioEvidence, "explicit-english-dub");
+});
+
 test("extracts structured resolution, codec, HDR, and keeps ambiguous audio unknown", () => {
   const result = normalizeStream({
     title: "Show S01E01 2160p WEB-DL HEVC HDR10",

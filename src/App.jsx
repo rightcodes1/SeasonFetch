@@ -139,6 +139,7 @@ const RESOLUTION_PREFERENCES = [
 ];
 const AUDIO_PREFERENCES = [
   { value: 'any', label: 'Any audio' },
+  { value: 'english-dubbed-only', label: 'Explicit English Dub only' },
   { value: 'english-dubbed-or-dual', label: 'English dubbed / dual audio' }
 ];
 

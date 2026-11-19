@@ -185,9 +185,9 @@ export function selectBestSource(streams = [], preference = "default", audioMode
     if (filters.codec && candidate.codec !== filters.codec) return false;
     if (filters.hdr && candidate.hdr !== filters.hdr) return false;
     return true;
-  }).filter(candidate => audioMode !== "english-dubbed-or-dual"
-    || candidate.audio === "english-dubbed"
-    || candidate.audio === "dual-audio");
+  }).filter(candidate => audioMode === "any"
+    || (audioMode === "english-dubbed-only" && candidate.audio === "english-dubbed")
+    || (audioMode === "english-dubbed-or-dual" && (candidate.audio === "english-dubbed" || candidate.audio === "dual-audio")));
   const aliases = { "best-overall": "balanced", "smallest-acceptable": "smallest", "most-reliable": "seeders" };
   const mode = ["default", "smallest", "seeders", "1337x", "balanced", "quality"].includes(aliases[preference] || preference) ? (aliases[preference] || preference) : "default";
   const qualityScore = candidate => (candidate.resolution === "2160p" ? 4 : candidate.resolution === "1440p" ? 3 : candidate.resolution === "1080p" ? 2 : candidate.resolution === "720p" ? 1 : 0) + (candidate.hdr ? 0.35 : 0) + (candidate.codec === "HEVC" || candidate.codec === "AV1" ? 0.2 : 0);

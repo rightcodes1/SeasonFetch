@@ -170,7 +170,7 @@ app.get("/api/torrentio/season/:seriesId/:season", async (req, res) => {
   const episodeNumbers = req.query.episodeList
     ? parseEpisodeNumbers(explicitEpisodes)
     : parseEpisodeNumbers(explicitEpisodes, { numericMeansCount: true });
-  const audioMode = ["any", "english-dubbed-or-dual"].includes(req.query.audio) ? req.query.audio : "any";
+  const audioMode = ["any", "english-dubbed-only", "english-dubbed-or-dual"].includes(req.query.audio) ? req.query.audio : "any";
   const preference = ["default", "smallest", "seeders", "1337x", "balanced", "quality", "best-overall", "smallest-acceptable", "most-reliable"].includes(req.query.preference)
     ? req.query.preference
     : "default";
