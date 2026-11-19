@@ -10,7 +10,7 @@
     "dev": "node scripts/dev.mjs",
     "build": "vite build",
     "start": "node server/app.js",
-    "test": "node --test server/tests/*.test.js",
+    "test": "node --test server/tests/*.test.js server/tests/intelligence/*.test.js",
     "benchmark": "node scripts/benchmark-seasonfetch.mjs"
   },
   "dependencies": {

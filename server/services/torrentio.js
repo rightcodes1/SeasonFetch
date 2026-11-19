@@ -1,4 +1,5 @@
 import { selectBestSource } from "../utils/sourceParser.js";
+import { processTorrentioResults } from "../intelligence/providers/torrentioAdapter.js";
 
 const BASE_URL = (process.env.TORRENTIO_BASE_URL || "https://torrentio.strem.fun").replace(/\/+$/, "");
 
@@ -30,12 +31,24 @@ async function requestStreams(seriesId, season, episode) {
 export async function getEpisodeSources(seriesId, season, episode, preference = "default", audioMode = "any", filters = {}) {
   const streams = await requestStreams(seriesId, season, episode);
   const result = selectBestSource(streams, preference, audioMode, filters);
+  const intelligence = processTorrentioResults(streams, {
+    season,
+    episode,
+    profile: preference === "best-overall" ? "best-overall" : preference === "smallest-acceptable" ? "smallest-acceptable" : preference === "most-reliable" ? "most-reliable" : "best-overall"
+  });
 
   return {
     episode,
     status: result.status,
     selected: result.selected,
-    sources: result.candidates
+    sources: result.candidates,
+    intelligence: {
+      validatedCount: intelligence.validated.length,
+      duplicateGroupCount: intelligence.duplicateGroups.length,
+      recommendations: intelligence.recommendations,
+      ranked: intelligence.ranked
+    },
+    selectionReason: result.selectionReason
   };
 }
 
