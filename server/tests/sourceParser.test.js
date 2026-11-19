@@ -105,7 +105,7 @@ test("strict audio mode excludes dual-audio and unverified releases", () => {
 
 test("extracts structured resolution, codec, HDR, and keeps ambiguous audio unknown", () => {
   const result = normalizeStream({
-    title: "Show S01E01 2160p WEB-DL HEVC HDR10",
+    title: "[Judas] Show S01E01 2160p WEB-DL HEVC HDR10",
     infoHash: hashA
   });
 
@@ -113,6 +113,7 @@ test("extracts structured resolution, codec, HDR, and keeps ambiguous audio unkn
   assert.equal(result.codec, "HEVC");
   assert.equal(result.hdr, "HDR");
   assert.equal(result.audio, null);
+  assert.equal(result.releaseGroup, "Judas");
 });
 
 test("applies hard resolution, size, seeder, and codec filters before ranking", () => {

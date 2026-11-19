@@ -93,6 +93,11 @@ function detectReleaseType(text = "") {
   return null;
 }
 
+function detectReleaseGroup(text = "") {
+  const match = String(text).match(/^\s*\[([^\]]{2,40})\]/);
+  return match ? match[1].trim() : null;
+}
+
 function normalizeLink(value) {
   if (!value) return null;
 
@@ -171,7 +176,8 @@ export function normalizeStream(stream = {}) {
       ? "explicit-english-dub"
       : /\bdual\s+audio\b/i.test(searchableText) ? "possible-english-audio" : "unverified",
     releaseType: detectReleaseType(searchableText),
-    metadataCompleteness: [sizeBytes, seeders, fileIdx, detectResolution(searchableText), detectCodec(searchableText), detectReleaseType(searchableText)].filter(value => value !== null && value !== undefined).length
+    releaseGroup: detectReleaseGroup(searchableText),
+    metadataCompleteness: [sizeBytes, seeders, fileIdx, detectResolution(searchableText), detectCodec(searchableText), detectReleaseType(searchableText), detectReleaseGroup(searchableText)].filter(value => value !== null && value !== undefined).length
   };
 }
 
