@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { cinemeta } from './services/cinemeta.js';
 import { torrentio } from './services/torrentio.js';
 import AuthPanel from './components/AuthPanel.jsx';
@@ -848,6 +849,7 @@ function App() {
       {toast && <div className="toast"><span className="toast-icon"><Icon name="check" size={14} /></span>{toast}</div>}
       {showAuth && supabase && <AuthPanel key={authMode} supabase={supabase} initialMode={authMode} onClose={() => { setShowAuth(false); setAuthMode('sign-in'); }} />}
       {showAdmin && isAdmin && <AdminDashboard supabase={supabase} onClose={() => setShowAdmin(false)} />}
+      <Analytics />
     </div>
   );
 }
