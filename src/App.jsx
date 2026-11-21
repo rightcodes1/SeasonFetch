@@ -597,6 +597,37 @@ function App() {
     }, 760);
   }
 
+  function chooseAlternative(item, candidate) {
+    if (!item || !candidate) return;
+    setEpisodes(current => current.map(episode => {
+      if (episode.id !== item.id) return episode;
+      const remaining = (episode.candidates || []).filter(source => source.infoHash !== candidate.infoHash || source.fileIdx !== candidate.fileIdx);
+      return {
+        ...episode,
+        size: candidate.sizeLabel || 'Unknown',
+        status: candidate.sizeBytes === null ? 'size-unknown' : 'selected',
+        format: candidate.title || '',
+        hash: candidate.infoHash || '',
+        magnet: candidate.magnet || '',
+        rawMagnet: candidate.rawMagnet || '',
+        sourceUrl: candidate.sourceUrl || candidate.externalUrl || '',
+        fileIdx: candidate.fileIdx ?? null,
+        trackerCount: candidate.trackerCount || 0,
+        fallbackTrackersUsed: candidate.fallbackTrackersUsed || false,
+        provider: candidate.provider || '',
+        resolution: candidate.resolution || null,
+        seeders: candidate.seeders ?? null,
+        audio: candidate.audio || null,
+        audioEvidence: candidate.audioEvidence || 'unverified',
+        releaseType: candidate.releaseType || null,
+        candidates: [candidate, ...remaining],
+        selectionReason: `Manually selected alternative: ${candidate.sizeLabel || 'size unknown'}${candidate.seeders === null ? '' : `, ${candidate.seeders} seeders`}.`
+      };
+    }));
+    setToast('Alternative source selected');
+    window.setTimeout(() => setToast(''), 2400);
+  }
+
   function copyMagnet(magnet) {
     if (!magnet) return;
     if (navigator.clipboard?.writeText) navigator.clipboard.writeText(magnet).catch(() => {});
@@ -828,10 +859,10 @@ function App() {
                   {expanded[item.id] && <div className="episode-details">
                     {item.magnet ? <>
                       <div className="detail-top"><div><span className="detail-label">SELECTED SOURCE</span><strong>{item.format}</strong></div><div className="detail-actions">{item.sourceUrl && <a className="secondary-button small-button" href={item.sourceUrl} target="_blank" rel="noreferrer">Open source <Icon name="arrow" size={13} /></a>}{buildStremioDownloadLink(item) && <><button className="secondary-button small-button" onClick={checkStremioConnection}><Icon name="bolt" size={14} /> Check Stremio</button><a className="primary-button small-button" href={buildStremioDownloadLink(item)}>Open Stremio download <Icon name="arrow" size={13} /></a><button className="secondary-button small-button" onClick={() => copyStremioLink(item)}><Icon name="copy" size={14} /> Copy Stremio link</button></>}<a className="secondary-button small-button" href={item.magnet}>Open magnet <Icon name="link" size={13} /></a><button className="secondary-button small-button" onClick={() => copyMagnet(item.magnet)}><Icon name="copy" size={14} /> Copy magnet with trackers</button>{item.rawMagnet && <button className="secondary-button small-button" onClick={() => copyRawMagnet(item)}><Icon name="copy" size={14} /> Copy raw magnet</button>}<button className="secondary-button small-button" onClick={() => analyzeWithGemini(item)} disabled={geminiLoading[item.id]}><Icon name="bolt" size={14} /> {geminiLoading[item.id] ? 'Analyzing…' : 'Analyze with Gemini'}</button></div></div>
-                      <div className="detail-meta"><span><b>Resolution</b>{item.resolution || 'Unknown'}</span><span><b>File size</b>{item.size}</span>{item.audio && <span><b>Audio</b>{item.audio === 'dual-audio' ? 'Dual audio' : 'English dubbed'}</span>}<span><b>Audio evidence</b>{item.audioEvidence === 'explicit-english-dub' ? 'Explicit English Dub' : item.audioEvidence === 'possible-english-audio' ? 'Possible English Audio' : 'Unverified'}</span>{item.releaseType && <span><b>Release</b>{item.releaseType}</span>}{item.seeders !== null && <span><b>Seeders</b>{item.seeders.toLocaleString()}</span>}{item.provider && <span><b>Provider</b>{item.provider}</span>}{item.intelligence && <span><b>Validated</b>{item.intelligence.validatedCount} · {item.intelligence.duplicateGroupCount} groups</span>}<span><b>Info hash</b>{item.hash.slice(0, 12)}…</span>{item.fileIdx !== null && <span><b>File index</b>{item.fileIdx}</span>}{item.trackerCount > 0 && <span><b>Trackers</b>{item.trackerCount}</span>}</div>
+                      <div className="detail-meta"><span><b>Resolution</b>{item.resolution || 'Unknown'}</span><span><b>File size</b>{item.size}</span>{item.audio && <span><b>Audio</b>{item.audio === 'dual-audio' ? 'Dual audio' : 'English dubbed'}</span>}<span><b>Audio evidence</b>{item.audioEvidence === 'explicit-english-dub' ? 'Explicit English Dub' : item.audioEvidence === 'possible-english-audio' ? 'Possible English Audio' : 'Unverified'}</span>{item.releaseType && <span><b>Release</b>{item.releaseType}</span>}{item.seeders !== null && <span><b>Seeders</b>{item.seeders.toLocaleString()}</span>}{item.provider && <span><b>Provider</b>{item.provider}</span>}{item.intelligence && <span><b>Pipeline gate</b>{item.intelligence.eligibleCount ?? item.intelligence.validatedCount} eligible · {item.intelligence.rejectedCount ?? 0} rejected</span>}<span><b>Info hash</b>{item.hash.slice(0, 12)}…</span>{item.fileIdx !== null && <span><b>File index</b>{item.fileIdx}</span>}{item.trackerCount > 0 && <span><b>Trackers</b>{item.trackerCount}</span>}</div>
                       <div className="magnet-line"><code>{item.magnet}</code><a href={item.magnet} aria-label="Open magnet">Open</a><button onClick={() => copyMagnet(item.magnet)} aria-label="Copy magnet"><Icon name="copy" size={14} /></button></div>
-                      <p className="detail-note"><Icon name="bolt" size={13} /> {item.selectionReason || (providerMode === 'live' ? `${item.fallbackTrackersUsed ? 'Torrentio returned no trackers, so fallback trackers were added. ' : ''}The tracker magnet is recommended; use the raw magnet if your downloader manages its own tracker/DHT settings.` : 'Preview source selected by smallest known size.')}</p>
-                      {item.candidates?.length > 1 && <div className="alternatives-panel"><div className="alternatives-heading"><span className="detail-label">TOP ALTERNATIVES</span><span>Compared after hard filters</span></div>{item.candidates.slice(1, 4).map((candidate, index) => <div className="alternative-row" key={`${item.id}-alternative-${candidate.infoHash || index}`}><div><strong>{candidate.title || 'Untitled release'}</strong><span>{candidate.resolution || 'Resolution unknown'} · {candidate.sizeLabel || 'Size unknown'} · {candidate.seeders === null ? 'Seeders unknown' : `${candidate.seeders.toLocaleString()} seeders`}</span></div><em>{candidate.audioEvidence === 'explicit-english-dub' ? 'Explicit English Dub' : candidate.audioEvidence === 'possible-english-audio' ? 'Possible English Audio' : 'Audio unverified'}</em></div>)}</div>}
+                      <p className="detail-note"><Icon name="bolt" size={13} /> {item.selectionReason || (providerMode === 'live' ? `${item.fallbackTrackersUsed ? 'Torrentio returned no trackers, so fallback trackers were added. ' : ''}The tracker magnet is recommended; use the raw magnet if your downloader manages its own tracker/DHT settings.` : 'Preview source selected by smallest known size.')}{item.audioEvidence === 'possible-english-audio' ? ' English audio is indicated by filename metadata but not verified from the media tracks.' : ''}</p>
+                      {item.candidates?.length > 1 && <div className="alternatives-panel"><div className="alternatives-heading"><span className="detail-label">TOP ALTERNATIVES</span><span>Compared after hard filters</span></div>{item.candidates.slice(1, 4).map((candidate, index) => <div className="alternative-row" key={`${item.id}-alternative-${candidate.infoHash || index}`}><div><strong>{candidate.title || 'Untitled release'}</strong><span>{candidate.resolution || 'Resolution unknown'} · {candidate.sizeLabel || 'Size unknown'} · {candidate.seeders === null ? 'Seeders unknown' : `${candidate.seeders.toLocaleString()} seeders`}</span></div><em>{candidate.audioEvidence === 'explicit-english-dub' ? 'Explicit English Dub' : candidate.audioEvidence === 'possible-english-audio' ? 'Possible English Audio' : 'Audio unverified'}</em><button className="secondary-button small-button" onClick={() => chooseAlternative(item, candidate)}>Use this source</button></div>)}</div>}
                       {geminiAnalysis[item.id] && <div className={`gemini-panel ${geminiAnalysis[item.id].error ? 'is-error' : ''}`}><div className="gemini-panel-heading"><span className="gemini-label">GEMINI ASSIST</span>{(geminiAnalysis[item.id].recommendation?.confidence || geminiAnalysis[item.id].confidence) && <strong>{geminiAnalysis[item.id].recommendation?.confidence || geminiAnalysis[item.id].confidence} confidence</strong>}</div>{geminiAnalysis[item.id].error ? <p>{geminiAnalysis[item.id].error}</p> : <><p>{geminiAnalysis[item.id].recommendation?.reason || geminiAnalysis[item.id].reason || 'No explanation returned.'}</p>{(geminiAnalysis[item.id].recommendation?.warnings || geminiAnalysis[item.id].warnings)?.length > 0 && <ul>{(geminiAnalysis[item.id].recommendation?.warnings || geminiAnalysis[item.id].warnings).map((warning, index) => <li key={`${item.id}-warning-${index}`}>{warning}</li>)}</ul>}<small>Torrentio’s deterministic selection remains the download source.</small></>}</div>}
                     </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>{item.preview ? 'Preview data is not downloadable' : 'No valid 1080p source found'}</strong><span>{item.preview ? 'Torrentio was unavailable during this scan. Run Check sources again to retrieve a real magnet.' : (item.sourceError || 'Try again later — provider availability can change.')}</span></div></div>}
                   </div>}

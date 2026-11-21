@@ -48,6 +48,8 @@ export async function getEpisodeSources(seriesId, season, episode, preference = 
     sources: candidates,
     intelligence: {
       validatedCount: intelligence.validated.length,
+      eligibleCount: intelligence.eligible.length,
+      rejectedCount: intelligence.rejected.length,
       eligible: intelligence.eligible,
       rejected: intelligence.rejected,
       duplicateGroupCount: intelligence.duplicateGroups.length,
