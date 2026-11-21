@@ -1,0 +1,105 @@
+[
+  {
+    "name": "metadata-rich-duplicate-and-filter",
+    "input": {
+      "contractVersion": "seasonfetch.intelligence.v1",
+      "request": {
+        "season": 1,
+        "episode": 1,
+        "profile": "smallest-acceptable",
+        "audioMode": "any",
+        "filters": { "resolution": "1080p", "maxSizeBytes": null, "minSeeders": null, "codec": null, "hdr": null }
+      },
+      "candidates": [
+        { "id": "source-a-0", "title": "Show S01E01 1080p", "infoHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fileIdx": 0, "resolution": "1080p", "codec": null, "hdr": null, "container": null, "sizeBytes": null, "seeders": null, "provider": "Torrentio", "releaseType": null, "releaseGroup": null, "metadataCompleteness": 1, "audio": { "classification": "unverified", "languages": [], "confidence": 0, "evidence": [] } },
+        { "id": "source-a-1", "title": "[GroupA] Show S01E01 1080p WEB-DL HEVC 700 MB English Dub", "infoHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fileIdx": 0, "resolution": "1080p", "codec": "HEVC", "hdr": null, "container": "mkv", "sizeBytes": 734003200, "seeders": 20, "provider": "Torrentio", "releaseType": "WEB-DL", "releaseGroup": "GroupA", "metadataCompleteness": 7, "audio": { "classification": "explicit-english-dub", "languages": ["en"], "confidence": 1, "evidence": ["english-dubbed"] } },
+        { "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:0", "title": "Show S01E01 1080p WEB-DL 1 GB", "infoHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "fileIdx": 0, "resolution": "1080p", "codec": null, "hdr": null, "container": "mkv", "sizeBytes": 1073741824, "seeders": 100, "provider": "Torrentio", "releaseType": "WEB-DL", "releaseGroup": null, "metadataCompleteness": 4, "audio": { "classification": "unverified", "languages": [], "confidence": 0, "evidence": [] } },
+        { "id": "cccccccccccccccccccccccccccccccccccccccc:0", "title": "Show S01E01 720p WEB-DL 300 MB", "infoHash": "cccccccccccccccccccccccccccccccccccccccc", "fileIdx": 0, "resolution": "720p", "codec": null, "hdr": null, "container": "mkv", "sizeBytes": 314572800, "seeders": 200, "provider": "Torrentio", "releaseType": "WEB-DL", "releaseGroup": null, "metadataCompleteness": 4, "audio": { "classification": "unverified", "languages": [], "confidence": 0, "evidence": [] } }
+      ]
+    }
+  },
+  {
+    "name": "strict-english-rejects-generic-dual-audio",
+    "input": {
+      "contractVersion": "seasonfetch.intelligence.v1",
+      "request": {
+        "season": 1,
+        "episode": 1,
+        "profile": "smallest-acceptable",
+        "audioMode": "english-dubbed-only",
+        "filters": { "resolution": "1080p", "maxSizeBytes": null, "minSeeders": null, "codec": null, "hdr": null }
+      },
+      "candidates": [
+        { "id": "dddddddddddddddddddddddddddddddddddddddd:0", "title": "Show S01E01 1080p 500 MB Dual Audio", "infoHash": "dddddddddddddddddddddddddddddddddddddddd", "fileIdx": 0, "resolution": "1080p", "codec": null, "hdr": null, "container": "mkv", "sizeBytes": 524288000, "seeders": 900, "provider": "Torrentio", "releaseType": null, "releaseGroup": null, "metadataCompleteness": 4, "audio": { "classification": "possible-english-audio", "languages": [], "confidence": 0.5, "evidence": ["dual-audio"] } },
+        { "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee:0", "title": "Show S01E01 1080p 700 MB English Dub", "infoHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "fileIdx": 0, "resolution": "1080p", "codec": null, "hdr": null, "container": "mkv", "sizeBytes": 734003200, "seeders": 20, "provider": "Torrentio", "releaseType": null, "releaseGroup": null, "metadataCompleteness": 4, "audio": { "classification": "explicit-english-dub", "languages": ["en"], "confidence": 1, "evidence": ["english-dubbed"] } }
+      ]
+    }
+  },
+  {
+    "name": "no-eligible-candidate",
+    "input": {
+      "contractVersion": "seasonfetch.intelligence.v1",
+      "request": {
+        "season": 1,
+        "episode": 1,
+        "profile": "best-overall",
+        "audioMode": "any",
+        "filters": { "resolution": "1080p", "maxSizeBytes": null, "minSeeders": null, "codec": null, "hdr": null }
+      },
+      "candidates": [
+        { "id": "ffffffffffffffffffffffffffffffffffffffff:0", "title": "Show S01E01 720p 300 MB", "infoHash": "ffffffffffffffffffffffffffffffffffffffff", "fileIdx": 0, "resolution": "720p", "codec": null, "hdr": null, "container": "mkv", "sizeBytes": 314572800, "seeders": 10, "provider": "Torrentio", "releaseType": null, "releaseGroup": null, "metadataCompleteness": 4, "audio": { "classification": "unverified", "languages": [], "confidence": 0, "evidence": [] } }
+      ]
+    }
+  },
+  {
+    "name": "invalid-hash-and-multiple-filter-reasons",
+    "input": {
+      "contractVersion": "seasonfetch.intelligence.v1",
+      "request": {
+        "season": 1,
+        "episode": 2,
+        "profile": "most-reliable",
+        "audioMode": "english-dubbed-only",
+        "filters": { "resolution": "any", "maxSizeBytes": null, "minSeeders": 50, "codec": "HEVC", "hdr": "HDR" }
+      },
+      "candidates": [
+        { "id": "eligible-hevc", "title": "Show S01E02 1080p", "infoHash": "1111111111111111111111111111111111111111", "fileIdx": 0, "resolution": "1080p", "codec": "HEVC", "hdr": "HDR", "container": "mkv", "sizeBytes": 900000000, "seeders": 75, "provider": "Torrentio", "releaseType": "WEB-DL", "releaseGroup": "A", "metadataCompleteness": 7, "audio": { "classification": "explicit-english-dub", "languages": ["en"], "confidence": 1, "evidence": ["english-dubbed"] } },
+        { "id": "missing-hash", "title": "Show S01E02 1080p", "infoHash": null, "fileIdx": null, "resolution": "1080p", "codec": "HEVC", "hdr": "HDR", "container": "mkv", "sizeBytes": 900000000, "seeders": 75, "provider": "Torrentio", "releaseType": "WEB-DL", "releaseGroup": "A", "metadataCompleteness": 7, "audio": { "classification": "explicit-english-dub", "languages": ["en"], "confidence": 1, "evidence": ["english-dubbed"] } },
+        { "id": "filter-rejected", "title": "Show S01E02 720p", "infoHash": "2222222222222222222222222222222222222222", "fileIdx": 0, "resolution": "720p", "codec": null, "hdr": null, "container": "mkv", "sizeBytes": 300000000, "seeders": 3, "provider": "Torrentio", "releaseType": null, "releaseGroup": null, "metadataCompleteness": 2, "audio": { "classification": "possible-english-audio", "languages": [], "confidence": 0.5, "evidence": ["dual-audio"] } }
+      ]
+    }
+  },
+  {
+    "name": "stable-id-ties-with-partial-metadata",
+    "input": {
+      "contractVersion": "seasonfetch.intelligence.v1",
+      "request": {
+        "season": null,
+        "episode": 1,
+        "profile": "best-overall",
+        "audioMode": "any",
+        "filters": { "resolution": "any", "maxSizeBytes": null, "minSeeders": null, "codec": null, "hdr": null }
+      },
+      "candidates": [
+        { "id": "z-candidate", "title": "Tie Show S01E01", "infoHash": "3333333333333333333333333333333333333333", "fileIdx": null, "resolution": null, "codec": null, "hdr": null, "container": null, "sizeBytes": null, "seeders": null, "provider": null, "releaseType": null, "releaseGroup": null, "metadataCompleteness": 0, "audio": { "classification": "unverified", "languages": [], "confidence": 0, "evidence": [] } },
+        { "id": "a-candidate", "title": "Tie Show S01E01", "infoHash": "4444444444444444444444444444444444444444", "fileIdx": null, "resolution": null, "codec": null, "hdr": null, "container": null, "sizeBytes": null, "seeders": null, "provider": null, "releaseType": null, "releaseGroup": null, "metadataCompleteness": 0, "audio": { "classification": "unverified", "languages": [], "confidence": 0, "evidence": [] } }
+      ]
+    }
+  },
+  {
+    "name": "null-resolution-means-no-restriction",
+    "input": {
+      "contractVersion": "seasonfetch.intelligence.v1",
+      "request": {
+        "season": 1,
+        "episode": 1,
+        "profile": "best-overall",
+        "audioMode": "any",
+        "filters": { "resolution": null, "maxSizeBytes": null, "minSeeders": null, "codec": null, "hdr": null }
+      },
+      "candidates": [
+        { "id": "720p-with-null-filter", "title": "Show S01E01 720p", "infoHash": "5555555555555555555555555555555555555555", "fileIdx": 0, "resolution": "720p", "codec": null, "hdr": null, "container": "mkv", "sizeBytes": 350000000, "seeders": 40, "provider": "Torrentio", "releaseType": "WEB-DL", "releaseGroup": null, "metadataCompleteness": 4, "audio": { "classification": "unverified", "languages": [], "confidence": 0, "evidence": [] } }
+      ]
+    }
+  }
+]

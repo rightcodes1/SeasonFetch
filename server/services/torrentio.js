@@ -30,7 +30,7 @@ async function requestStreams(seriesId, season, episode) {
 
 export async function getEpisodeSources(seriesId, season, episode, preference = "default", audioMode = "any", filters = {}) {
   const streams = await requestStreams(seriesId, season, episode);
-  const intelligence = processTorrentioResults(streams, {
+  const intelligence = await processTorrentioResults(streams, {
     season,
     episode,
     profile: recommendationProfileForPreference(preference),
@@ -56,6 +56,18 @@ export async function getEpisodeSources(seriesId, season, episode, preference = 
     },
     selectionReason: selectedRelease ? selectionReason(selectedRelease) : "No source met the active hard filters."
   };
+}
+
+function publicRelease(release) {
+  if (!release) return null;
+  const { candidateId, ...publicFields } = release;
+  if (!publicFields.validation || typeof publicFields.validation !== "object") return publicFields;
+  const { candidateId: validationCandidateId, ...publicValidation } = publicFields.validation;
+  return { ...publicFields, validation: publicValidation };
+}
+
+function publicReleaseList(releases) {
+  return releases.map(publicRelease);
 }
 
 function recommendationKey(preference) {

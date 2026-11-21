@@ -25,7 +25,8 @@ export function parseSize(text = "") {
 
   const value = Number(match[1]);
   const unit = match[2].toUpperCase();
-  return Math.round(value * SIZE_UNITS[unit]);
+  const bytes = Math.round(value * SIZE_UNITS[unit]);
+  return Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
 }
 
 export function formatSize(bytes) {
@@ -69,7 +70,9 @@ function detectHdr(text = "") {
 
 export function parseSeeders(text = "") {
   const match = String(text).match(/(?:👤|seeders?|peers?)\s*[:=]?\s*(\d[\d,]*)/iu);
-  return match ? Number(match[1].replace(/,/g, "")) : null;
+  if (!match) return null;
+  const seeders = Number(match[1].replace(/,/g, ""));
+  return Number.isSafeInteger(seeders) && seeders >= 0 ? seeders : null;
 }
 
 function is1337x(text = "") {
@@ -78,7 +81,7 @@ function is1337x(text = "") {
 
 function detectAudio(text = "") {
   const normalized = String(text).toLowerCase().replace(/[._-]+/g, " ");
-  const dualAudio = /\bdual\s+audio\b|\bdual\s+audio\b/.test(normalized);
+  const dualAudio = /\bdual\s+audio\b/.test(normalized);
   const englishDub = /\b(?:english|eng)\s+(?:dub|dubbed)\b|\b(?:dub|dubbed)\s+(?:english|eng)\b/.test(normalized);
   if (dualAudio) return "dual-audio";
   if (englishDub) return "english-dubbed";
@@ -127,31 +130,32 @@ function buildMagnet(infoHash, { filename, fileIdx, sources = [], includeTracker
 }
 
 export function normalizeStream(stream = {}) {
-  const title = stream.title || "";
-  const description = stream.description || "";
-  const filename = stream.behaviorHints?.filename || "";
+  if (!stream || typeof stream !== "object" || Array.isArray(stream)) return null;
+  const title = typeof stream.title === "string" ? stream.title : "";
+  const description = typeof stream.description === "string" ? stream.description : "";
+  const filename = typeof stream.behaviorHints?.filename === "string" ? stream.behaviorHints.filename : "";
   const searchableText = [title, description, filename].join(" ");
   const infoHash = String(stream.infoHash || "");
 
   if (!HASH_REGEX.test(infoHash)) return null;
 
   const parsedSize = parseSize(searchableText);
-  const structuredSize = Number.isFinite(stream.size) && stream.size > 0 ? stream.size : null;
+  const structuredSize = Number.isSafeInteger(stream.size) && stream.size > 0 ? stream.size : null;
   const sizeBytes = structuredSize ?? parsedSize;
   const normalizedHash = infoHash.toLowerCase();
-  const fileIdx = Number.isInteger(stream.fileIdx) && stream.fileIdx >= 0 ? stream.fileIdx : null;
+  const fileIdx = Number.isSafeInteger(stream.fileIdx) && stream.fileIdx >= 0 ? stream.fileIdx : null;
   const sources = Array.isArray(stream.sources) ? stream.sources.filter(item => typeof item === "string") : [];
   const filenameValue = filename || title || "1080p source";
   const sourceTrackers = sources.filter(item => item.startsWith("tracker:"));
   const fallbackTrackersUsed = sourceTrackers.length === 0;
   const magnetOptions = { filename: filenameValue, fileIdx, sources, fallbackTrackers: FALLBACK_TRACKERS };
   const provider = String([stream.name, searchableText].filter(Boolean).join(" ")).match(/1337x/i) ? "1337x" : null;
-  const seeders = Number.isFinite(stream.seeders) && stream.seeders >= 0
+  const seeders = Number.isSafeInteger(stream.seeders) && stream.seeders >= 0
     ? stream.seeders
     : parseSeeders(searchableText);
 
   return {
-    name: stream.name || "Torrentio",
+    name: typeof stream.name === "string" && stream.name.trim() ? stream.name : "Torrentio",
     title: title || filename || "1080p source",
     description,
     infoHash: normalizedHash,
