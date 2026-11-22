@@ -11,7 +11,9 @@
     "build": "vite build",
     "start": "node server/app.js",
     "test": "node --test server/tests/*.test.js server/tests/intelligence/*.test.js",
-    "benchmark": "node scripts/benchmark-seasonfetch.mjs"
+    "benchmark": "node scripts/benchmark-seasonfetch.mjs",
+    "benchmark:shadow": "node scripts/benchmark-shadow.mjs",
+    "wasm:build": "node scripts/build-intelligence-wasm.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",

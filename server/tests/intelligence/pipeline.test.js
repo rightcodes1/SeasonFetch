@@ -33,6 +33,37 @@ test("pipeline deduplicates equivalent provider records without guessing fields"
   assert.equal(result.ranked[0].audio.classification, "unverified");
 });
 
+test("duplicate groups choose the metadata-richest representative deterministically", () => {
+  const result = processReleases([
+    { title: "Show S01E01 1080p", infoHash: hashA, fileIdx: 0 },
+    { title: "[GroupA] Show S01E01 1080p WEB-DL HEVC 1 GB 👤 20 English Dub", infoHash: hashA, fileIdx: 0 }
+  ]);
+
+  assert.equal(result.duplicateGroups.length, 1);
+  assert.equal(result.duplicateGroups[0].representative.audio.classification, "explicit-english-dub");
+  assert.equal(result.duplicateGroups[0].representative.releaseGroup, "GroupA");
+  assert.equal(result.ranked[0].id, result.recommendations.bestOverall.id);
+});
+
+test("episode availability counts only deduplicated candidates that pass hard filters", () => {
+  const result = processReleases([
+    { title: "Show S01E01 1080p WEB-DL 700 MB", infoHash: hashA, fileIdx: 0 },
+    { title: "Show S01E01 720p WEB-DL 300 MB", infoHash: hashB, fileIdx: 0 }
+  ], { filters: { resolution: "1080p" } });
+
+  assert.equal(result.validated.length, 2);
+  assert.equal(result.eligible.length, 1);
+  assert.equal(result.eligibleRepresentatives.length, 1);
+  assert.equal(result.episode.status, "available");
+  assert.equal(result.episode.releaseCount, 1);
+
+  const unavailable = processReleases([
+    { title: "Show S01E01 720p WEB-DL 300 MB", infoHash: hashB, fileIdx: 0 }
+  ], { filters: { resolution: "1080p" } });
+  assert.equal(unavailable.episode.status, "missing");
+  assert.equal(unavailable.episode.releaseCount, 0);
+});
+
 test("ranking profiles are deterministic and explain their component scores", () => {
   const releases = processReleases([
     { title: "Show 1080p WEB-DL 500 MB 👤 10", infoHash: hashA },
