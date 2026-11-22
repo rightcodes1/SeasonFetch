@@ -5,6 +5,8 @@ import AuthPanel from './components/AuthPanel.jsx';
 import AdminDashboard from './components/AdminDashboard.jsx';
 import AccountMenu from './components/AccountMenu.jsx';
 import { supabase } from './services/supabase.js';
+import ReleaseComparison from './components/ReleaseComparison.jsx';
+import { getEpisodeReleaseFields, getReleaseIdentity, restoreEpisodeRecommendation, selectEpisodeRelease } from './utils/releaseSelection.js';
 
 const SERIES = [
   {
@@ -533,7 +535,12 @@ function App() {
       sourceUrl: '',
       sourceCount: row.hash || row[4] ? 1 : 0,
       sourceError: '',
-      candidates: []
+      candidates: [],
+      recommendedSource: null,
+      recommendedSelectionId: '',
+      activeSelectionId: '',
+      manualSelectionId: '',
+      recommendedSelectionReason: ''
     }));
 
     const mapProviderRows = providerResults => baseRows.map((row, index) => {
@@ -541,32 +548,27 @@ function App() {
       const provider = providerResults.find(item => item.episode === episodeNumber);
       const source = provider?.selected;
       const status = provider?.status === 'error' ? 'provider-error' : (provider?.status || 'unavailable');
+      const sourceFields = source ? getEpisodeReleaseFields(source) : null;
+      const candidates = Array.isArray(provider?.sources) ? provider.sources : [];
+      const selectionId = getReleaseIdentity(source);
 
       return {
         id: `${selected.id}-${season}-${episodeNumber}`,
         number: episodeNumber,
         title: getEpisodeTitle(row, episodeNumber),
-        size: source?.sizeLabel || (status === 'unavailable' ? '—' : 'Unknown'),
-        status,
-        format: source?.title || '',
-        hash: source?.infoHash || '',
-        magnet: source?.magnet || '',
-        rawMagnet: source?.rawMagnet || '',
-        sourceUrl: source?.sourceUrl || source?.externalUrl || '',
-        fileIdx: source?.fileIdx ?? null,
-        trackerCount: source?.trackerCount || 0,
-        fallbackTrackersUsed: source?.fallbackTrackersUsed || false,
-        provider: source?.provider || '',
-        resolution: source?.resolution || null,
-        seeders: source?.seeders ?? null,
-        audio: source?.audio || null,
-        audioEvidence: source?.audioEvidence || 'unverified',
+        ...(sourceFields || {}),
+        size: sourceFields?.size || (status === 'unavailable' ? '—' : 'Unknown'),
+        status: sourceFields?.status || status,
         selectionReason: provider?.selectionReason || '',
-        releaseType: source?.releaseType || null,
         intelligence: provider?.intelligence || null,
-        sourceCount: provider?.sources?.length || 0,
-        sourceError: provider?.error || '',
-        candidates: provider?.sources || []
+        sourceCount: candidates.length,
+        sourceError: provider?.error || (source && !sourceFields?.magnet ? 'The selected source did not include a valid magnet matching its info hash.' : ''),
+        candidates,
+        recommendedSource: source || null,
+        recommendedSelectionId: selectionId,
+        activeSelectionId: selectionId,
+        manualSelectionId: '',
+        recommendedSelectionReason: provider?.selectionReason || ''
       };
     });
 
@@ -831,9 +833,13 @@ function App() {
                       <div className="detail-meta"><span><b>Resolution</b>{item.resolution || 'Unknown'}</span><span><b>File size</b>{item.size}</span>{item.audio && <span><b>Audio</b>{item.audio === 'dual-audio' ? 'Dual audio' : 'English dubbed'}</span>}<span><b>Audio evidence</b>{item.audioEvidence === 'explicit-english-dub' ? 'Explicit English Dub' : item.audioEvidence === 'possible-english-audio' ? 'Possible English Audio' : 'Unverified'}</span>{item.releaseType && <span><b>Release</b>{item.releaseType}</span>}{item.seeders !== null && <span><b>Seeders</b>{item.seeders.toLocaleString()}</span>}{item.provider && <span><b>Provider</b>{item.provider}</span>}{item.intelligence && <span><b>Validated</b>{item.intelligence.validatedCount} · {item.intelligence.duplicateGroupCount} groups</span>}<span><b>Info hash</b>{item.hash.slice(0, 12)}…</span>{item.fileIdx !== null && <span><b>File index</b>{item.fileIdx}</span>}{item.trackerCount > 0 && <span><b>Trackers</b>{item.trackerCount}</span>}</div>
                       <div className="magnet-line"><code>{item.magnet}</code><a href={item.magnet} aria-label="Open magnet">Open</a><button onClick={() => copyMagnet(item.magnet)} aria-label="Copy magnet"><Icon name="copy" size={14} /></button></div>
                       <p className="detail-note"><Icon name="bolt" size={13} /> {item.selectionReason || (providerMode === 'live' ? `${item.fallbackTrackersUsed ? 'Torrentio returned no trackers, so fallback trackers were added. ' : ''}The tracker magnet is recommended; use the raw magnet if your downloader manages its own tracker/DHT settings.` : 'Preview source selected by smallest known size.')}</p>
-                      {item.candidates?.length > 1 && <div className="alternatives-panel"><div className="alternatives-heading"><span className="detail-label">TOP ALTERNATIVES</span><span>Compared after hard filters</span></div>{item.candidates.slice(1, 4).map((candidate, index) => <div className="alternative-row" key={`${item.id}-alternative-${candidate.infoHash || index}`}><div><strong>{candidate.title || 'Untitled release'}</strong><span>{candidate.resolution || 'Resolution unknown'} · {candidate.sizeLabel || 'Size unknown'} · {candidate.seeders === null ? 'Seeders unknown' : `${candidate.seeders.toLocaleString()} seeders`}</span></div><em>{candidate.audioEvidence === 'explicit-english-dub' ? 'Explicit English Dub' : candidate.audioEvidence === 'possible-english-audio' ? 'Possible English Audio' : 'Audio unverified'}</em></div>)}</div>}
                       {geminiAnalysis[item.id] && <div className={`gemini-panel ${geminiAnalysis[item.id].error ? 'is-error' : ''}`}><div className="gemini-panel-heading"><span className="gemini-label">GEMINI ASSIST</span>{(geminiAnalysis[item.id].recommendation?.confidence || geminiAnalysis[item.id].confidence) && <strong>{geminiAnalysis[item.id].recommendation?.confidence || geminiAnalysis[item.id].confidence} confidence</strong>}</div>{geminiAnalysis[item.id].error ? <p>{geminiAnalysis[item.id].error}</p> : <><p>{geminiAnalysis[item.id].recommendation?.reason || geminiAnalysis[item.id].reason || 'No explanation returned.'}</p>{(geminiAnalysis[item.id].recommendation?.warnings || geminiAnalysis[item.id].warnings)?.length > 0 && <ul>{(geminiAnalysis[item.id].recommendation?.warnings || geminiAnalysis[item.id].warnings).map((warning, index) => <li key={`${item.id}-warning-${index}`}>{warning}</li>)}</ul>}<small>Torrentio’s deterministic selection remains the download source.</small></>}</div>}
                     </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>{item.preview ? 'Preview data is not downloadable' : 'No valid 1080p source found'}</strong><span>{item.preview ? 'Torrentio was unavailable during this scan. Run Check sources again to retrieve a real magnet.' : (item.sourceError || 'Try again later — provider availability can change.')}</span></div></div>}
+                    <ReleaseComparison
+                      item={item}
+                      onSelect={candidate => setEpisodes(current => selectEpisodeRelease(current, item.id, candidate))}
+                      onRestore={() => setEpisodes(current => restoreEpisodeRecommendation(current, item.id))}
+                    />
                   </div>}
                 </div>)}
               </div>
