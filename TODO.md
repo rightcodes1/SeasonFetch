@@ -31,6 +31,14 @@
 - [x] Surface partial and complete Torrentio provider failures distinctly from normal no-source results.
 - [x] Show live Torrentio status in the UI and preserve clearly labeled preview fallback data when the provider is unavailable.
 
+## Release comparison and manual override
+- [ ] Clearly identify the automatic recommendation and, when an episode is expanded, show every available candidate with only the metadata actually supplied: resolution/quality, size, seeders, audio evidence/language, release group, provider, and source link.
+- [ ] Distinguish the automatic recommendation from a manually selected release; provide “Use this release” and a way to restore the automatic recommendation.
+- [ ] Immediately update only the chosen episode’s active release, magnet, and download actions after a manual selection; keep episode selections independent.
+- [ ] Preserve candidate data and magnet/source mappings; do not fabricate missing metadata; safely handle empty candidates, invalid magnets, duplicates, and missing metadata; keep selections stable through rerenders; never imply that a manual selection verifies a release.
+- [ ] Keep the default episode list compact, reveal detailed comparisons only on expansion, match the existing dark theme, and remain responsive on desktop and mobile without unrelated redesigns or animations.
+- [ ] Keep automatic recommendations as the default; preserve English Dub Only, quality filters, season coverage, authentication, and existing downloads. Do not modify Rust/WASM, rewrite ranking, or add a provider/dependency unless necessary.
+
 ## Production deployment
 - [x] Export the Express app for a Vercel Node function while retaining the local server entrypoint.
 - [x] Add Vercel build and API rewrite configuration for the Vite frontend and provider proxy.
