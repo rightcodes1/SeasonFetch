@@ -1,0 +1,35 @@
+name: Windows desktop build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/tauri-desktop-shell
+
+permissions:
+  contents: read
+
+jobs:
+  windows-desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Build Tauri desktop executable
+        run: npm run desktop:build
+      - name: Launch desktop executable
+        shell: pwsh
+        run: |
+          $app = Join-Path $PWD 'src-tauri/target/release/seasonfetch.exe'
+          if (-not (Test-Path $app)) { throw "Desktop executable not found: $app" }
+          $process = Start-Process -FilePath $app -PassThru
+          Start-Sleep -Seconds 10
+          $process.Refresh()
+          if ($process.HasExited) { throw "SeasonFetch desktop exited during startup with code $($process.ExitCode)" }
+          Stop-Process -Id $process.Id -Force

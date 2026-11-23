@@ -11,10 +11,13 @@
     "build": "vite build",
     "start": "node server/app.js",
     "test": "node --test server/tests/*.test.js server/tests/intelligence/*.test.js",
-    "benchmark": "node scripts/benchmark-seasonfetch.mjs"
+    "benchmark": "node scripts/benchmark-seasonfetch.mjs",
+    "desktop:dev": "tauri dev",
+    "desktop:build": "tauri build --no-bundle"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",
+    "@tauri-apps/api": "2.12.5",
     "@vitejs/plugin-react": "latest",
     "cors": "latest",
     "dotenv": "latest",
@@ -24,5 +27,8 @@
     "react": "latest",
     "react-dom": "latest",
     "vite": "latest"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.6"
   }
 }

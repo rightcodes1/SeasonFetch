@@ -14,6 +14,7 @@ import { createSearchCoordinator } from './utils/searchCoordinator.js';
 import { toGeminiCandidate } from './utils/geminiCandidates.js';
 import { normalizeRankingPreference, rankingPreferenceDescription, rankingPreferenceHint, RANKING_PREFERENCES } from '../shared/rankingPreferences.js';
 import { getNoSourceCopy, getResolutionPreferenceLabel, getResolutionSummaryCopy, RESOLUTION_PREFERENCES } from './utils/resolutionDisplay.js';
+import DesktopBridgeStatus from './desktop/DesktopBridgeStatus.jsx';
 
 const SERIES = [
   {
@@ -927,7 +928,7 @@ function App() {
         )}
       </main>
 
-      <footer className="footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Metadata: Cinemeta live <i /> Sources: Torrentio proxy <i /> {resolutionLabel}</span></footer>
+      <footer className="footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Metadata: Cinemeta live <i /> Sources: Torrentio proxy <i /> {resolutionLabel}</span><DesktopBridgeStatus /></footer>
       {toast && <div className="toast"><span className="toast-icon"><Icon name="check" size={14} /></span>{toast}</div>}
       {showAuth && supabase && <AuthPanel key={authMode} supabase={supabase} initialMode={authMode} onClose={() => { setShowAuth(false); setAuthMode('sign-in'); }} />}
       {showAdmin && isAdmin && <AdminDashboard supabase={supabase} onClose={() => setShowAdmin(false)} />}
