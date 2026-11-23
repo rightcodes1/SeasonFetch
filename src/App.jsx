@@ -7,6 +7,13 @@ import AccountMenu from './components/AccountMenu.jsx';
 import { supabase } from './services/supabase.js';
 import ReleaseComparison from './components/ReleaseComparison.jsx';
 import { getEpisodeReleaseFields, getReleaseIdentity, restoreEpisodeRecommendation, selectEpisodeRelease } from './utils/releaseSelection.js';
+import { copyTextToClipboard } from './utils/clipboard.js';
+import { signOutFromAuth } from './utils/accountActions.js';
+import { createScanCoordinator } from './utils/scanCoordinator.js';
+import { createSearchCoordinator } from './utils/searchCoordinator.js';
+import { toGeminiCandidate } from './utils/geminiCandidates.js';
+import { normalizeRankingPreference, rankingPreferenceDescription, rankingPreferenceHint, RANKING_PREFERENCES } from '../shared/rankingPreferences.js';
+import { getNoSourceCopy, getResolutionPreferenceLabel, getResolutionSummaryCopy, RESOLUTION_PREFERENCES } from './utils/resolutionDisplay.js';
 
 const SERIES = [
   {
@@ -125,20 +132,6 @@ const SERIES = [
 ];
 
 const STREMIO_DOWNLOAD_ORIGIN = 'http://127.0.0.1:11470';
-const TORRENTIO_PREFERENCES = [
-  { value: 'best-overall', label: 'Best Overall' },
-  { value: 'smallest-acceptable', label: 'Smallest Acceptable' },
-  { value: 'most-reliable', label: 'Most Reliable' },
-  { value: '1337x', label: 'Prefer 1337x' },
-  { value: 'balanced', label: 'Balanced' },
-  { value: 'quality', label: 'Highest quality' }
-];
-const RESOLUTION_PREFERENCES = [
-  { value: '1080p', label: '1080p only' },
-  { value: '720p', label: '720p only' },
-  { value: '2160p', label: '4K only' },
-  { value: 'any', label: 'Any resolution' }
-];
 const AUDIO_PREFERENCES = [
   { value: 'any', label: 'Any audio' },
   { value: 'english-dubbed-only', label: 'Explicit English Dub only' },
@@ -235,12 +228,16 @@ function App() {
   const [authMode, setAuthMode] = useState(recoveryLinkDetected ? 'reset' : 'sign-in');
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
-  const searchRequestRef = useRef(0);
+  const suggestionRequestRef = useRef(0);
+  const suggestionTimerRef = useRef(null);
   const metadataRequestRef = useRef(0);
-  const scanRequestRef = useRef(0);
+  const searchCoordinatorRef = useRef(null);
+  if (!searchCoordinatorRef.current) searchCoordinatorRef.current = createSearchCoordinator();
+  const scanCoordinatorRef = useRef(null);
+  if (!scanCoordinatorRef.current) scanCoordinatorRef.current = createScanCoordinator({ onCheckingChange: setChecking });
   const [torrentioPreference, setTorrentioPreference] = useState(() => {
     const stored = window.localStorage.getItem('seasonfetch:torrentio-preference');
-    return TORRENTIO_PREFERENCES.some(option => option.value === stored) ? stored : 'default';
+    return normalizeRankingPreference(stored);
   });
   const [audioPreference, setAudioPreference] = useState(() => {
     const stored = window.localStorage.getItem('seasonfetch:audio-preference');
@@ -251,9 +248,46 @@ function App() {
     return RESOLUTION_PREFERENCES.some(option => option.value === stored) ? stored : '1080p';
   });
   const [seasonIntegrity, setSeasonIntegrity] = useState(null);
+  const scanContextRef = useRef(null);
+  scanContextRef.current = {
+    seriesId: selected?.imdbId || null,
+    season,
+    preference: torrentioPreference,
+    audioPreference,
+    resolutionPreference
+  };
 
   const available = useMemo(() => episodes.filter(item => !['unavailable', 'provider-error'].includes(item.status)).length, [episodes]);
   const progress = episodes.length ? Math.round((available / episodes.length) * 100) : 0;
+
+  function invalidateScan() {
+    scanCoordinatorRef.current.invalidate();
+  }
+
+  function invalidateSearch() {
+    searchCoordinatorRef.current.invalidate();
+    setSearching(false);
+  }
+
+  function invalidateSuggestions() {
+    suggestionRequestRef.current += 1;
+    if (suggestionTimerRef.current !== null) {
+      window.clearTimeout(suggestionTimerRef.current);
+      suggestionTimerRef.current = null;
+    }
+    setSuggestionsLoading(false);
+  }
+
+  function scanContextMatches(expected) {
+    const current = scanContextRef.current;
+    return current.seriesId === expected.seriesId
+      && current.season === expected.season
+      && current.preference === expected.preference
+      && current.audioPreference === expected.audioPreference
+      && current.resolutionPreference === expected.resolutionPreference;
+  }
+
+  useEffect(() => () => scanCoordinatorRef.current?.invalidate(), []);
 
   useEffect(() => {
     if (!supabase) return undefined;
@@ -299,9 +333,17 @@ function App() {
   }, [user]);
 
   async function signOut() {
-    if (supabase) await supabase.auth.signOut();
-    setToast('Signed out');
-    window.setTimeout(() => setToast(''), 2200);
+    if (!supabase) {
+      setNotice('Sign-out is unavailable because Supabase authentication is not configured.');
+      return;
+    }
+    try {
+      await signOutFromAuth(supabase.auth);
+      setToast('Signed out');
+      window.setTimeout(() => setToast(''), 2200);
+    } catch (error) {
+      setNotice(`Unable to sign out: ${error.message || 'Supabase did not confirm sign-out.'}`);
+    }
   }
 
   function decorateResults(items) {
@@ -327,25 +369,33 @@ function App() {
     if (cleanQuery.length < 2) {
       setSearchSuggestions([]);
       setSuggestionsLoading(false);
+      if (suggestionTimerRef.current !== null) {
+        window.clearTimeout(suggestionTimerRef.current);
+        suggestionTimerRef.current = null;
+      }
       return undefined;
     }
 
     let active = true;
+    const requestId = ++suggestionRequestRef.current;
     setSuggestionsLoading(true);
     const timer = window.setTimeout(async () => {
+      suggestionTimerRef.current = null;
       try {
         const data = await cinemeta.search(cleanQuery);
-        if (active) setSearchSuggestions(decorateResults(data.results || []).slice(0, 5));
+        if (active && requestId === suggestionRequestRef.current) setSearchSuggestions(decorateResults(data.results || []).slice(0, 5));
       } catch {
-        if (active) setSearchSuggestions([]);
+        if (active && requestId === suggestionRequestRef.current) setSearchSuggestions([]);
       } finally {
-        if (active) setSuggestionsLoading(false);
+        if (active && requestId === suggestionRequestRef.current) setSuggestionsLoading(false);
       }
     }, 280);
+    suggestionTimerRef.current = timer;
 
     return () => {
       active = false;
       window.clearTimeout(timer);
+      if (suggestionTimerRef.current === timer) suggestionTimerRef.current = null;
     };
   }, [query]);
 
@@ -367,8 +417,10 @@ function App() {
 
   function runSearch(event, overrideQuery) {
     event?.preventDefault();
+    invalidateScan();
+    invalidateSearch();
+    invalidateSuggestions();
     const cleanQuery = String(overrideQuery ?? query).trim().toLowerCase();
-    const requestId = ++searchRequestRef.current;
     setSearchTouched(true);
     setSearching(true);
     setNotice(null);
@@ -376,9 +428,9 @@ function App() {
     setSelected(null);
     setEpisodes([]);
     setExpanded({});
-    window.setTimeout(async () => {
+    searchCoordinatorRef.current.schedule(async requestId => {
       if (cleanQuery.length < 2) {
-        if (requestId !== searchRequestRef.current) return;
+        if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
         setResults([]);
         setSearching(false);
         setNotice('Enter at least two characters to search.');
@@ -387,26 +439,27 @@ function App() {
 
       try {
         const data = await cinemeta.search(cleanQuery);
-        if (requestId !== searchRequestRef.current) return;
+        if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
         let nextResults = decorateResults(data.results || []);
         let correctedQuery = '';
         if (!nextResults.length) {
           try {
             const assisted = await searchWithGeminiAssist(cleanQuery);
-            if (requestId !== searchRequestRef.current) return;
+            if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
             nextResults = assisted.results;
             correctedQuery = assisted.correctedQuery;
           } catch (assistError) {
             console.warn('Gemini search assist failed:', assistError);
           }
         }
+        if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
         setResults(nextResults);
         setSearchSuggestions(nextResults.slice(0, 5));
         setSearching(false);
         if (correctedQuery) setNotice(`Gemini search assist matched “${correctedQuery}”.`);
         else if (!nextResults.length) setNotice('No series found. Try another title.');
       } catch (error) {
-        if (requestId !== searchRequestRef.current) return;
+        if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
         console.warn('Cinemeta search failed; using local preview matches.', error);
         const fallback = SERIES.filter(item => `${item.title} ${item.type}`.toLowerCase().includes(cleanQuery));
         setResults(fallback);
@@ -417,7 +470,9 @@ function App() {
   }
 
   async function chooseSeries(series) {
-    scanRequestRef.current += 1;
+    invalidateSearch();
+    invalidateSuggestions();
+    invalidateScan();
     const requestId = ++metadataRequestRef.current;
     const local = SERIES.find(item => item.imdbId === series.imdbId || item.id === series.id);
     const baseSeasonCount = Number(series.seasons || local?.seasons || 1);
@@ -468,7 +523,7 @@ function App() {
   }
 
   function changeTorrentioPreference(value) {
-    scanRequestRef.current += 1;
+    invalidateScan();
     setTorrentioPreference(value);
     window.localStorage.setItem('seasonfetch:torrentio-preference', value);
     setEpisodes([]);
@@ -478,7 +533,7 @@ function App() {
   }
 
   function changeAudioPreference(value) {
-    scanRequestRef.current += 1;
+    invalidateScan();
     setAudioPreference(value);
     window.localStorage.setItem('seasonfetch:audio-preference', value);
     setEpisodes([]);
@@ -488,7 +543,7 @@ function App() {
   }
 
   function changeResolutionPreference(value) {
-    scanRequestRef.current += 1;
+    invalidateScan();
     setResolutionPreference(value);
     window.localStorage.setItem('seasonfetch:resolution-preference', value);
     setEpisodes([]);
@@ -499,13 +554,12 @@ function App() {
 
   function checkSources() {
     if (!selected) return;
-    const requestId = ++scanRequestRef.current;
     const scanSeriesId = selected.imdbId;
     const scanSeason = season;
     const scanPreference = torrentioPreference;
     const scanAudioPreference = audioPreference;
     const scanResolutionPreference = resolutionPreference;
-    setChecking(true);
+    invalidateScan();
     setEpisodes([]);
     setSeasonIntegrity(null);
     setExpanded({});
@@ -520,6 +574,13 @@ function App() {
     }
 
     const episodeNumbers = baseRows.map(getEpisodeNumber);
+    const scanContext = {
+      seriesId: scanSeriesId,
+      season: scanSeason,
+      preference: scanPreference,
+      audioPreference: scanAudioPreference,
+      resolutionPreference: scanResolutionPreference
+    };
 
     const makeDemoRows = () => baseRows.map((row, index) => ({
       id: `${selected.id}-${season}-${index + 1}`,
@@ -572,60 +633,77 @@ function App() {
       };
     });
 
-    window.setTimeout(() => {
-      torrentio.getSeasonSources(selected.imdbId, season, episodeNumbers, torrentioPreference, audioPreference, { resolution: scanResolutionPreference })
-        .then(data => {
-          if (requestId !== scanRequestRef.current || selected?.imdbId !== scanSeriesId || season !== scanSeason || torrentioPreference !== scanPreference || audioPreference !== scanAudioPreference || resolutionPreference !== scanResolutionPreference) return;
-          setEpisodes(mapProviderRows(data.results || []));
-          setSeasonIntegrity(data.integrity || null);
-          setProviderMode(data.status === 'partial' ? 'partial' : data.status === 'error' ? 'error' : 'live');
-          setChecking(false);
-          if (data.status === 'partial') setNotice(`${data.providerErrors} episode source request${data.providerErrors === 1 ? '' : 's'} failed; successful Torrentio results are still shown.`);
-          if (data.status === 'error') setNotice('Torrentio could not answer the episode requests. Try the scan again later.');
-          setToast(`Season ${season} Torrentio scan complete`);
-          window.setTimeout(() => setToast(''), 2600);
-        })
-        .catch(error => {
-          if (requestId !== scanRequestRef.current || selected?.imdbId !== scanSeriesId || season !== scanSeason || torrentioPreference !== scanPreference || audioPreference !== scanAudioPreference) return;
-          console.warn('Torrentio lookup failed; using preview data.', error);
-          setEpisodes(makeDemoRows());
-          setSeasonIntegrity(null);
-          setProviderMode('demo');
-          setChecking(false);
-          setNotice('Torrentio is unavailable right now, so preview source data is shown instead.');
-          setToast('Showing preview fallback data');
-          window.setTimeout(() => setToast(''), 2600);
-        });
-    }, 760);
+    scanCoordinatorRef.current.start({
+      delayMs: 760,
+      request: signal => torrentio.getSeasonSources(
+        scanSeriesId,
+        scanSeason,
+        episodeNumbers,
+        scanPreference,
+        scanAudioPreference,
+        { resolution: scanResolutionPreference },
+        { signal }
+      ),
+      onSuccess: data => {
+        if (!scanContextMatches(scanContext)) { invalidateScan(); return; }
+        setEpisodes(mapProviderRows(data.results || []));
+        setSeasonIntegrity(data.integrity || null);
+        setProviderMode(data.status === 'partial' ? 'partial' : data.status === 'error' ? 'error' : 'live');
+        if (data.status === 'partial') setNotice(`${data.providerErrors} episode source request${data.providerErrors === 1 ? '' : 's'} failed; successful Torrentio results are still shown.`);
+        if (data.status === 'error') setNotice('Torrentio could not answer the episode requests. Try the scan again later.');
+        setToast(`Season ${scanSeason} Torrentio scan complete`);
+        window.setTimeout(() => setToast(''), 2600);
+      },
+      onError: error => {
+        if (!scanContextMatches(scanContext)) { invalidateScan(); return; }
+        if (error?.name === 'AbortError') return;
+        console.warn('Torrentio lookup failed; using preview data.', error);
+        setEpisodes(makeDemoRows());
+        setSeasonIntegrity(null);
+        setProviderMode('demo');
+        setNotice('Torrentio is unavailable right now, so preview source data is shown instead.');
+        setToast('Showing preview fallback data');
+        window.setTimeout(() => setToast(''), 2600);
+      }
+    });
   }
 
-  function copyMagnet(magnet) {
+  async function copyMagnet(magnet) {
     if (!magnet) return;
-    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(magnet).catch(() => {});
-    setToast('Magnet link copied to clipboard');
-    window.setTimeout(() => setToast(''), 2400);
+    try {
+      await copyTextToClipboard(magnet);
+      setNotice(null);
+      setToast('Magnet link copied to clipboard');
+      window.setTimeout(() => setToast(''), 2400);
+    } catch (error) { setNotice(error.message); }
   }
 
-  function copyRawMagnet(item) {
+  async function copyRawMagnet(item) {
     if (!item?.rawMagnet) return;
-    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(item.rawMagnet).catch(() => {});
-    setToast('Raw magnet link copied');
-    window.setTimeout(() => setToast(''), 2400);
+    try {
+      await copyTextToClipboard(item.rawMagnet);
+      setNotice(null);
+      setToast('Raw magnet link copied');
+      window.setTimeout(() => setToast(''), 2400);
+    } catch (error) { setNotice(error.message); }
   }
 
   function getSeasonMagnets() {
     return episodes.filter(item => item.magnet && !item.preview).map(item => item.magnet);
   }
 
-  function copySeasonMagnets() {
+  async function copySeasonMagnets() {
     const magnets = getSeasonMagnets();
     if (!magnets.length) {
       setNotice('No live Torrentio magnets are available for this season yet. Run Check sources first.');
       return;
     }
-    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(magnets.join('\n')).catch(() => {});
-    setToast(`${magnets.length} season magnet${magnets.length === 1 ? '' : 's'} copied`);
-    window.setTimeout(() => setToast(''), 2400);
+    try {
+      await copyTextToClipboard(magnets.join('\n'));
+      setNotice(null);
+      setToast(`${magnets.length} season magnet${magnets.length === 1 ? '' : 's'} copied`);
+      window.setTimeout(() => setToast(''), 2400);
+    } catch (error) { setNotice(error.message); }
   }
 
   function downloadSeasonMagnets() {
@@ -648,12 +726,15 @@ function App() {
     window.setTimeout(() => setToast(''), 2400);
   }
 
-  function copyStremioLink(item) {
+  async function copyStremioLink(item) {
     const link = buildStremioDownloadLink(item);
     if (!link) return;
-    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(link).catch(() => {});
-    setToast('Stremio download link copied');
-    window.setTimeout(() => setToast(''), 2400);
+    try {
+      await copyTextToClipboard(link);
+      setNotice(null);
+      setToast('Stremio download link copied');
+      window.setTimeout(() => setToast(''), 2400);
+    } catch (error) { setNotice(error.message); }
   }
 
   async function checkStremioConnection() {
@@ -670,16 +751,7 @@ function App() {
     if (!item?.id || item.preview) return;
     setGeminiLoading(current => ({ ...current, [item.id]: true }));
     setGeminiAnalysis(current => ({ ...current, [item.id]: null }));
-    const candidates = (item.candidates?.length ? item.candidates : [item]).map(candidate => ({
-      title: candidate.title || candidate.format || '',
-      provider: candidate.provider || '',
-      resolution: candidate.resolution || '1080p',
-      sizeBytes: candidate.sizeBytes ?? null,
-      seeders: candidate.seeders ?? null,
-      trackerCount: candidate.trackerCount || 0,
-      fileIdx: candidate.fileIdx ?? null,
-      preferredProvider: Boolean(candidate.preferredProvider)
-    }));
+    const candidates = (item.candidates?.length ? item.candidates : [item]).map(toGeminiCandidate);
 
     try {
       const response = await fetch('/api/gemini/explain-source', {
@@ -698,6 +770,10 @@ function App() {
   }
 
   function reset() {
+    invalidateSearch();
+    invalidateSuggestions();
+    invalidateScan();
+    metadataRequestRef.current += 1;
     setQuery('');
     setResults([]);
     setSelected(null);
@@ -710,6 +786,7 @@ function App() {
   }
 
   const seasonOptions = selected?.seasonNumbers || Array.from({ length: selected?.seasons || 0 }, (_, index) => index + 1);
+  const resolutionLabel = getResolutionPreferenceLabel(resolutionPreference);
 
   return (
     <div className="app-shell">
@@ -723,7 +800,7 @@ function App() {
           <div className="topbar-right">
           <span className="live-indicator"><i /> Live discovery</span>
           <span className="topbar-label">TV SOURCE DISCOVERY</span>
-          {user ? <AccountMenu supabase={supabase} user={user} profile={profile} isAdmin={isAdmin} onAdmin={() => setShowAdmin(true)} onSignOut={signOut} onProfileUpdated={setProfile} /> : <button className="account-trigger account-sign-in" onClick={() => setShowAuth(true)}>Sign in</button>}
+          {user ? <AccountMenu supabase={supabase} user={user} profile={profile} isAdmin={isAdmin} onAdmin={() => setShowAdmin(true)} onSignOut={signOut} onProfileUpdated={setProfile} /> : <button className="account-trigger account-sign-in" onClick={() => { if (supabase) setShowAuth(true); else setNotice('Sign-in is unavailable because Supabase authentication is not configured for this deployment.'); }}>Sign in</button>}
         </div>
       </header>
 
@@ -731,11 +808,11 @@ function App() {
         <section className="hero">
           <div className="eyebrow"><span className="eyebrow-dot" /> SEASON SOURCE FINDER</div>
           <h1>Find your season.<br /><span>One episode at a time.</span></h1>
-          <p className="hero-copy">Discover clean, high-quality sources for every episode.<br className="desktop-only" /> Automatically prioritize the smallest known file size.</p>
+          <p className="hero-copy">Discover clean, high-quality sources for every episode.<br className="desktop-only" /> {rankingPreferenceDescription(torrentioPreference)}</p>
           <form className="search-form" onSubmit={runSearch}>
             <Icon name="search" size={18} />
-            <input value={query} onChange={event => { setQuery(event.target.value); setSearchTouched(false); }} placeholder="Search a TV series..." aria-label="Search a TV series" />
-            {query && <button className="clear-search" type="button" onClick={() => setQuery('')} aria-label="Clear search"><Icon name="x" size={15} /></button>}
+            <input value={query} onChange={event => { invalidateSearch(); setQuery(event.target.value); setSearchTouched(false); }} placeholder="Search a TV series..." aria-label="Search a TV series" />
+            {query && <button className="clear-search" type="button" onClick={() => { invalidateSearch(); setQuery(''); }} aria-label="Clear search"><Icon name="x" size={15} /></button>}
             <button className="search-button" disabled={searching} type="submit">
               {searching ? <span className="spinner" /> : <>Search <Icon name="arrow" size={15} /></>}
             </button>
@@ -748,7 +825,7 @@ function App() {
               <span className="card-arrow"><Icon name="arrow" size={14} /></span>
             </button>)}
           </div>}
-          <div className="search-hint"><span><Icon name="check" size={12} /> 1080p only</span><b>·</b><span><Icon name="trend" size={12} /> Smallest known size</span><b>·</b><span><Icon name="link" size={12} /> Magnet links</span></div>
+          <div className="search-hint"><span><Icon name="check" size={12} /> {resolutionLabel}</span><b>·</b><span><Icon name="trend" size={12} /> {rankingPreferenceHint(torrentioPreference)}</span><b>·</b><span><Icon name="link" size={12} /> Magnet links</span></div>
         </section>
 
         {notice && <div className="notice"><span className="notice-dot" />{notice}<button onClick={() => setNotice(null)}><Icon name="x" size={14} /></button></div>}
@@ -789,14 +866,14 @@ function App() {
                 <p className="synopsis">{selected.synopsis}</p>
                 <div className="genre-row">{(selected.genres || []).map(genre => <span key={genre}>{genre}</span>)}</div>
               </div>
-              <button className="change-button" onClick={() => { setSelected(null); setEpisodes([]); setResults(SERIES); }}>Change series <Icon name="arrow" size={14} /></button>
+              <button className="change-button" onClick={() => { invalidateScan(); setSelected(null); setEpisodes([]); setResults(SERIES); }}>Change series <Icon name="arrow" size={14} /></button>
             </div>
 
             <div className="season-toolbar">
               <div><span className="section-kicker">EPISODE SOURCES</span><h2>Season results</h2></div>
               <div className="season-controls">
-                <div className="select-wrap"><Icon name="filter" size={15} /><select value={season} onChange={event => { scanRequestRef.current += 1; setSeason(Number(event.target.value)); setEpisodes([]); setExpanded({}); setProviderMode('ready'); }} aria-label="Choose season">{seasonOptions.map(item => <option key={item} value={item}>{item === 0 ? 'Specials' : `Season ${item}`}</option>)}</select><Icon name="down" size={14} /></div>
-                <div className="select-wrap preference-wrap"><Icon name="trend" size={15} /><select value={torrentioPreference} onChange={event => changeTorrentioPreference(event.target.value)} aria-label="Choose Torrentio ranking preference">{TORRENTIO_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
+                <div className="select-wrap"><Icon name="filter" size={15} /><select value={season} onChange={event => { invalidateScan(); setSeason(Number(event.target.value)); setEpisodes([]); setExpanded({}); setProviderMode('ready'); }} aria-label="Choose season">{seasonOptions.map(item => <option key={item} value={item}>{item === 0 ? 'Specials' : `Season ${item}`}</option>)}</select><Icon name="down" size={14} /></div>
+                <div className="select-wrap preference-wrap"><Icon name="trend" size={15} /><select value={torrentioPreference} onChange={event => changeTorrentioPreference(event.target.value)} aria-label="Choose Torrentio ranking preference">{RANKING_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
                 <div className="select-wrap preference-wrap"><Icon name="link" size={15} /><select value={audioPreference} onChange={event => changeAudioPreference(event.target.value)} aria-label="Choose audio filter">{AUDIO_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
                 <div className="select-wrap preference-wrap"><Icon name="spark" size={15} /><select value={resolutionPreference} onChange={event => changeResolutionPreference(event.target.value)} aria-label="Choose resolution filter">{RESOLUTION_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
                 <button className="secondary-button" onClick={copySeasonMagnets} disabled={checking || !episodes.length}><Icon name="copy" size={15} /> Copy season magnets</button>
@@ -811,11 +888,11 @@ function App() {
               <div className="summary-panel">
                 <div className="summary-stat"><span className="summary-label">AVAILABLE</span><strong>{available}<small>/{episodes.length}</small></strong></div>
                 <div className="summary-progress"><div className="progress-label"><span>Season coverage</span><b>{progress}%</b></div><div className="progress-track"><i style={{ width: `${progress}%` }} /></div></div>
-                <div className="summary-chip"><span className="chip-dot" /> {providerMode === 'live' ? 'Torrentio live · 1080p only' : providerMode === 'partial' ? 'Torrentio partial · retry failed rows' : providerMode === 'error' ? 'Torrentio error · retry scan' : providerMode === 'demo' ? 'Preview fallback · 1080p only' : '1080p filter active'}</div>
+                <div className="summary-chip"><span className="chip-dot" /> {getResolutionSummaryCopy(providerMode, resolutionPreference)}</div>
               </div>
               {seasonIntegrity && <div className="integrity-panel">
                 <div><span className="section-kicker">SEASON INTEGRITY</span><strong>{seasonIntegrity.usableEpisodes} / {episodes.length} usable episodes</strong></div>
-                <div className="integrity-grid"><span><b>Missing</b>{seasonIntegrity.missingEpisodes?.length ? seasonIntegrity.missingEpisodes.map(number => `E${String(number).padStart(2, '0')}`).join(', ') : 'None'}</span><span><b>Resolution</b>{seasonIntegrity.resolutionConsistency || 'Unknown'}</span><span><b>Audio evidence</b>{seasonIntegrity.audioConsistency === 'explicit-english-dub' ? 'Explicit English Dub' : seasonIntegrity.audioConsistency === 'possible-english-audio' ? 'Possible English Audio' : seasonIntegrity.audioConsistency === 'mixed' ? 'Mixed' : 'Unverified'}</span><span><b>Release groups</b>{seasonIntegrity.releaseGroups?.length ? seasonIntegrity.releaseGroups.join(', ') : 'Unknown'}</span><span><b>Estimated size</b>{seasonIntegrity.estimatedTotalSizeBytes ? `${(seasonIntegrity.estimatedTotalSizeBytes / 1024 ** 3).toFixed(2)} GB` : 'Unknown'}</span><span><b>Weak releases</b>{seasonIntegrity.weakEpisodes?.length ? seasonIntegrity.weakEpisodes.map(number => `E${String(number).padStart(2, '0')}`).join(', ') : 'None detected'}</span></div>
+                <div className="integrity-grid"><span><b>Missing</b>{seasonIntegrity.missingEpisodes?.length ? seasonIntegrity.missingEpisodes.map(number => `E${String(number).padStart(2, '0')}`).join(', ') : 'None'}</span><span><b>Resolution</b>{seasonIntegrity.resolutionConsistency || 'Unknown'}</span><span><b>Audio evidence</b>{seasonIntegrity.audioConsistency === 'explicit-english-dub' ? 'Explicit English Dub' : seasonIntegrity.audioConsistency === 'possible-english-audio' ? 'Possible English Audio' : seasonIntegrity.audioConsistency === 'mixed' ? 'Mixed' : 'Unverified'}</span><span><b>Release groups</b>{seasonIntegrity.releaseGroups?.length ? seasonIntegrity.releaseGroups.join(', ') : 'Unknown'}</span><span><b>Selected-release size estimate</b>{seasonIntegrity.estimatedTotalSizeBytes ? `${(seasonIntegrity.estimatedTotalSizeBytes / 1024 ** 3).toFixed(2)} GB · ${seasonIntegrity.estimatedSizeComplete ? 'all ' : 'partial · '}${seasonIntegrity.estimatedSizeKnownEpisodes}/${episodes.length} sizes known` : `Unknown · ${seasonIntegrity.estimatedSizeKnownEpisodes || 0}/${episodes.length} sizes known`}</span><span><b>Weak releases</b>{seasonIntegrity.weakEpisodes?.length ? seasonIntegrity.weakEpisodes.map(number => `E${String(number).padStart(2, '0')}`).join(', ') : 'None detected'}</span></div>
               </div>}
               <div className="episode-table">
                 <div className="table-header"><span>EPISODE</span><span>SOURCE</span><span>FILE SIZE</span><span>STATUS</span><span /></div>
@@ -834,7 +911,7 @@ function App() {
                       <div className="magnet-line"><code>{item.magnet}</code><a href={item.magnet} aria-label="Open magnet">Open</a><button onClick={() => copyMagnet(item.magnet)} aria-label="Copy magnet"><Icon name="copy" size={14} /></button></div>
                       <p className="detail-note"><Icon name="bolt" size={13} /> {item.selectionReason || (providerMode === 'live' ? `${item.fallbackTrackersUsed ? 'Torrentio returned no trackers, so fallback trackers were added. ' : ''}The tracker magnet is recommended; use the raw magnet if your downloader manages its own tracker/DHT settings.` : 'Preview source selected by smallest known size.')}</p>
                       {geminiAnalysis[item.id] && <div className={`gemini-panel ${geminiAnalysis[item.id].error ? 'is-error' : ''}`}><div className="gemini-panel-heading"><span className="gemini-label">GEMINI ASSIST</span>{(geminiAnalysis[item.id].recommendation?.confidence || geminiAnalysis[item.id].confidence) && <strong>{geminiAnalysis[item.id].recommendation?.confidence || geminiAnalysis[item.id].confidence} confidence</strong>}</div>{geminiAnalysis[item.id].error ? <p>{geminiAnalysis[item.id].error}</p> : <><p>{geminiAnalysis[item.id].recommendation?.reason || geminiAnalysis[item.id].reason || 'No explanation returned.'}</p>{(geminiAnalysis[item.id].recommendation?.warnings || geminiAnalysis[item.id].warnings)?.length > 0 && <ul>{(geminiAnalysis[item.id].recommendation?.warnings || geminiAnalysis[item.id].warnings).map((warning, index) => <li key={`${item.id}-warning-${index}`}>{warning}</li>)}</ul>}<small>Torrentio’s deterministic selection remains the download source.</small></>}</div>}
-                    </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>{item.preview ? 'Preview data is not downloadable' : 'No valid 1080p source found'}</strong><span>{item.preview ? 'Torrentio was unavailable during this scan. Run Check sources again to retrieve a real magnet.' : (item.sourceError || 'Try again later — provider availability can change.')}</span></div></div>}
+                    </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>{item.preview ? 'Preview data is not downloadable' : getNoSourceCopy(resolutionPreference)}</strong><span>{item.preview ? 'Torrentio was unavailable during this scan. Run Check sources again to retrieve a real magnet.' : (item.sourceError || 'Try again later — provider availability can change.')}</span></div></div>}
                     <ReleaseComparison
                       item={item}
                       onSelect={candidate => setEpisodes(current => selectEpisodeRelease(current, item.id, candidate))}
@@ -850,7 +927,7 @@ function App() {
         )}
       </main>
 
-      <footer className="footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Metadata: Cinemeta live <i /> Sources: Torrentio proxy <i /> 1080p normalized</span></footer>
+      <footer className="footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Metadata: Cinemeta live <i /> Sources: Torrentio proxy <i /> {resolutionLabel}</span></footer>
       {toast && <div className="toast"><span className="toast-icon"><Icon name="check" size={14} /></span>{toast}</div>}
       {showAuth && supabase && <AuthPanel key={authMode} supabase={supabase} initialMode={authMode} onClose={() => { setShowAuth(false); setAuthMode('sign-in'); }} />}
       {showAdmin && isAdmin && <AdminDashboard supabase={supabase} onClose={() => setShowAdmin(false)} />}

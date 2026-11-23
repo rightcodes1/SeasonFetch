@@ -1,5 +1,6 @@
 import { processTorrentioResults } from "../intelligence/providers/torrentioAdapter.js";
 import { recommendationProfileForPreference } from "../intelligence/pipeline.js";
+import { calculateSeasonSizeEstimate } from "./seasonSizeEstimate.js";
 
 const BASE_URL = (process.env.TORRENTIO_BASE_URL || "https://torrentio.strem.fun").replace(/\/+$/, "");
 
@@ -28,7 +29,7 @@ async function requestStreams(seriesId, season, episode) {
   return Array.isArray(data.streams) ? data.streams : [];
 }
 
-export async function getEpisodeSources(seriesId, season, episode, preference = "default", audioMode = "any", filters = {}) {
+export async function getEpisodeSources(seriesId, season, episode, preference = "smallest-acceptable", audioMode = "any", filters = {}) {
   const streams = await requestStreams(seriesId, season, episode);
   const intelligence = processTorrentioResults(streams, {
     season,
@@ -59,10 +60,15 @@ export async function getEpisodeSources(seriesId, season, episode, preference = 
 }
 
 function recommendationKey(preference) {
-  if (["smallest", "smallest-acceptable", "default"].includes(preference)) return "smallestAcceptable";
-  if (["seeders", "most-reliable"].includes(preference)) return "mostReliable";
-  if (["quality", "highest-quality"].includes(preference)) return "highestQuality";
-  return "bestOverall";
+  const profile = recommendationProfileForPreference(preference);
+  return {
+    "best-overall": "bestOverall",
+    "smallest-acceptable": "smallestAcceptable",
+    "most-reliable": "mostReliable",
+    "prefer-1337x": "prefer1337x",
+    balanced: "balanced",
+    "highest-quality": "highestQuality"
+  }[profile];
 }
 
 function selectionReason(release) {
@@ -74,7 +80,7 @@ function selectionReason(release) {
   ].join(", ");
 }
 
-export async function getSeasonSources(seriesId, season, episodeNumbers, preference = "default", audioMode = "any", filters = {}) {
+export async function getSeasonSources(seriesId, season, episodeNumbers, preference = "smallest-acceptable", audioMode = "any", filters = {}) {
   const requestedEpisodes = Array.isArray(episodeNumbers)
     ? episodeNumbers.filter(number => Number.isInteger(number) && number > 0).slice(0, 30)
     : Array.from({ length: Math.min(Math.max(Number(episodeNumbers) || 0, 0), 30) }, (_, index) => index + 1);
@@ -109,7 +115,7 @@ export async function getSeasonSources(seriesId, season, episodeNumbers, prefere
   const resolutions = [...new Set(selected.map(source => source.resolution).filter(Boolean))];
   const audioEvidence = [...new Set(selected.map(source => source.audioEvidence).filter(Boolean))];
   const releaseGroups = [...new Set(selected.map(source => source.releaseGroup).filter(Boolean))];
-  const totalSizeBytes = selected.reduce((total, source) => total + (source.sizeBytes || 0), 0);
+  const sizeEstimate = calculateSeasonSizeEstimate(results);
 
   return {
     requestedEpisodes,
@@ -122,7 +128,10 @@ export async function getSeasonSources(seriesId, season, episodeNumbers, prefere
       resolutionConsistency: resolutions.length === 1 ? resolutions[0] : resolutions.length ? "mixed" : "unknown",
       audioConsistency: audioEvidence.length === 1 ? audioEvidence[0] : audioEvidence.length ? "mixed" : "unknown",
       releaseGroups,
-      estimatedTotalSizeBytes: totalSizeBytes || null,
+      estimatedTotalSizeBytes: sizeEstimate.knownSizeBytes,
+      estimatedSizeKnownEpisodes: sizeEstimate.knownEpisodeCount,
+      estimatedSizeUnknownEpisodes: sizeEstimate.unknownEpisodeCount,
+      estimatedSizeComplete: sizeEstimate.complete,
       weakEpisodes: results.filter(result => result.selected && (result.selected.seeders === null || result.selected.sizeBytes === null)).map(result => result.episode)
     },
     status: providerErrors === results.length && results.length ? "error" : providerErrors ? "partial" : "live"
