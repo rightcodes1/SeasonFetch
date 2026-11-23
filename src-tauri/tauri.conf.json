@@ -3,6 +3,9 @@
   "productName": "SeasonFetch",
   "version": "1.1.0",
   "identifier": "com.seasonfetch.desktop",
+  "bundle": {
+    "icon": ["icons/icon.ico"]
+  },
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:3000",
