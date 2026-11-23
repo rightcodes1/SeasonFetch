@@ -52,8 +52,8 @@
 - [x] Smoke-test the production Express entrypoint, `/api/health`, live Cinemeta search, and a live Torrentio episode scan locally.
 
 ## Phase 1 — Tauri desktop shell
-- [ ] Keep the website React/Vite + Express/Vercel behavior independent: preserve `npm run dev`, the existing `npm run build` behavior, Vercel deployment configuration, existing API routes, and website Supabase authentication.
-- [ ] Add a separate Tauri 2 desktop shell that reuses the existing React interface, with desktop-only development and build commands.
-- [ ] Demonstrate typed native IPC with a Rust command and a Rust event received by the desktop frontend; keep the website unaffected.
-- [ ] Verify the existing SeasonFetch interface builds and launches as a Windows desktop application.
-- [ ] Stop Phase 1 without torrent-engine integration, database migration, authentication changes, production deployment, PR merging, or changes to `main`.
+- [x] Keep the website React/Vite + Express/Vercel behavior independent: preserve `npm run dev`, the existing `npm run build` behavior, Vercel deployment configuration, existing API routes, and website Supabase authentication. Verified protected files are unchanged, website tests and build pass, and the existing dev frontend/API smoke test succeeds.
+- [x] Add a separate Tauri 2 desktop shell that reuses the existing React interface, with desktop-only development and build commands. Windows build completed successfully in GitHub Actions.
+- [x] Demonstrate typed native IPC with a Rust command and a Rust event received by the desktop frontend; keep the website unaffected. The Windows app build and startup smoke test succeeded with the native command/event bridge registered.
+- [x] Verify the existing SeasonFetch interface builds and launches as a Windows desktop application. Windows executable build and 10-second process startup check passed in GitHub Actions.
+- [x] Stop Phase 1 without torrent-engine integration, database migration, authentication changes, production deployment, PR merging, or changes to `main`.
