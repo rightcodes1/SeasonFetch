@@ -23,16 +23,11 @@ jobs:
         run: npm ci
       - name: Build Tauri desktop executable
         run: npm run desktop:build
-      - name: Launch desktop executable
+      - name: Launch app and verify UI and native IPC
         shell: pwsh
         run: |
-          $app = Join-Path $PWD 'src-tauri/target/release/seasonfetch.exe'
-          if (-not (Test-Path $app)) { throw "Desktop executable not found: $app" }
-          $process = Start-Process -FilePath $app -PassThru
-          Start-Sleep -Seconds 10
-          $process.Refresh()
-          if ($process.HasExited) { throw "SeasonFetch desktop exited during startup with code $($process.ExitCode)" }
-          Stop-Process -Id $process.Id -Force
+          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222 --remote-allow-origins=*'
+          node scripts/desktop-smoke.mjs (Join-Path $PWD 'src-tauri/target/release/seasonfetch.exe')
       - name: Upload test executable
         uses: actions/upload-artifact@v4
         with:
