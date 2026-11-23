@@ -39,6 +39,13 @@
 - [ ] Keep the default episode list compact, reveal detailed comparisons only on expansion, match the existing dark theme, and remain responsive on desktop and mobile without unrelated redesigns or animations.
 - [ ] Keep automatic recommendations as the default; preserve English Dub Only, quality filters, season coverage, authentication, and existing downloads. Do not modify Rust/WASM, rewrite ranking, or add a provider/dependency unless necessary.
 
+## FDM handoff tray
+- [x] Add individual currently selected episode releases or all available season releases, including independent manual selections; reject previews and invalid or incomplete magnets.
+- [x] Keep a downloader-independent, movie-compatible selection model; deduplicate by torrent hash and file index, retain all episode references, and order episodes numerically.
+- [x] Show the unique download count, empty state, per-download removal and clear controls, handling missing properties safely and retaining selections across title and season changes during the session.
+- [x] Copy validated magnets one per line in deterministic order, report clipboard failures, and explain that FDM import requires user action and that multi-magnet clipboard import on current FDM 6.x is unverified.
+- [x] Preserve individual magnet open/copy, existing season TXT export, Stremio fallback, release comparison, manual overrides, and the existing layout; do not imply an FDM transfer has been queued.
+
 ## Production deployment
 - [x] Export the Express app for a Vercel Node function while retaining the local server entrypoint.
 - [x] Add Vercel build and API rewrite configuration for the Vite frontend and provider proxy.
