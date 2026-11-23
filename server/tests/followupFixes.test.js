@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createSearchCoordinator } from "../../src/utils/searchCoordinator.js";
 import { toGeminiCandidate } from "../../src/utils/geminiCandidates.js";
-import { rankingPreferenceDescription, RANKING_PREFERENCES } from "../../shared/rankingPreferences.js";
+import { rankingPreferenceDescription, rankingPreferenceHint, RANKING_PREFERENCES } from "../../shared/rankingPreferences.js";
 import { calculateSeasonSizeEstimate } from "../services/seasonSizeEstimate.js";
 import { sanitizeCandidates } from "../services/gemini.js";
 import { scoreRelease } from "../intelligence/ranking/scoreRelease.js";
+import { getNoSourceCopy, getResolutionPreferenceLabel, getResolutionSummaryCopy, RESOLUTION_PREFERENCES } from "../../src/utils/resolutionDisplay.js";
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -147,7 +148,7 @@ test("season size estimate is complete only when every requested episode has a k
   });
 });
 
-test("each canonical ranking preference supplies distinct hero copy", () => {
+test("each canonical ranking preference supplies distinct hero and hint copy", async () => {
   const descriptions = RANKING_PREFERENCES.map(({ value, description }) => {
     assert.ok(description.length > 0, `${value} needs a hero description`);
     assert.equal(rankingPreferenceDescription(value), description);
@@ -155,4 +156,37 @@ test("each canonical ranking preference supplies distinct hero copy", () => {
   });
   assert.equal(new Set(descriptions).size, RANKING_PREFERENCES.length);
   assert.equal(rankingPreferenceDescription("missing-preference"), rankingPreferenceDescription("smallest-acceptable"));
+  const hints = RANKING_PREFERENCES.map(({ value, hint }) => {
+    assert.ok(hint.length > 0, `${value} needs a short ranking hint`);
+    assert.equal(rankingPreferenceHint(value), hint);
+    return hint;
+  });
+  assert.equal(new Set(hints).size, RANKING_PREFERENCES.length);
+  const source = await readFile(new URL("../../src/App.jsx", import.meta.url), "utf8");
+  assert.match(source, /rankingPreferenceHint\(torrentioPreference\)/);
+});
+
+test("resolution status copy follows the selected resolution filter", async () => {
+  const expected = [
+    ["1080p", "1080p only", "No valid 1080p source found"],
+    ["720p", "720p only", "No valid 720p source found"],
+    ["2160p", "4K only", "No valid 4K source found"],
+    ["any", "Any resolution", "No valid source found"]
+  ];
+  for (const [value, label, missingSource] of expected) {
+    assert.equal(getResolutionPreferenceLabel(value), label);
+    assert.equal(getNoSourceCopy(value), missingSource);
+    assert.equal(getResolutionSummaryCopy("live", value), `Torrentio live · ${label}`);
+    assert.equal(getResolutionSummaryCopy("ready", value), `${label} filter active`);
+  }
+  assert.equal(getResolutionSummaryCopy("partial", "720p"), "Torrentio partial · retry failed rows");
+  assert.equal(getResolutionSummaryCopy("error", "2160p"), "Torrentio error · retry scan");
+  assert.equal(getResolutionSummaryCopy("demo", "1080p"), "Preview fallback · static demo data");
+  assert.equal(RESOLUTION_PREFERENCES.length, expected.length);
+
+  const source = await readFile(new URL("../../src/App.jsx", import.meta.url), "utf8");
+  assert.match(source, /\{resolutionLabel\}/);
+  assert.match(source, /getResolutionSummaryCopy\(providerMode, resolutionPreference\)/);
+  assert.match(source, /getNoSourceCopy\(resolutionPreference\)/);
+  assert.doesNotMatch(source, /Torrentio live · 1080p only|Preview fallback · 1080p only|1080p filter active|No valid 1080p source found/);
 });

@@ -12,7 +12,8 @@ import { signOutFromAuth } from './utils/accountActions.js';
 import { createScanCoordinator } from './utils/scanCoordinator.js';
 import { createSearchCoordinator } from './utils/searchCoordinator.js';
 import { toGeminiCandidate } from './utils/geminiCandidates.js';
-import { normalizeRankingPreference, rankingPreferenceDescription, RANKING_PREFERENCES } from '../shared/rankingPreferences.js';
+import { normalizeRankingPreference, rankingPreferenceDescription, rankingPreferenceHint, RANKING_PREFERENCES } from '../shared/rankingPreferences.js';
+import { getNoSourceCopy, getResolutionPreferenceLabel, getResolutionSummaryCopy, RESOLUTION_PREFERENCES } from './utils/resolutionDisplay.js';
 
 const SERIES = [
   {
@@ -131,12 +132,6 @@ const SERIES = [
 ];
 
 const STREMIO_DOWNLOAD_ORIGIN = 'http://127.0.0.1:11470';
-const RESOLUTION_PREFERENCES = [
-  { value: '1080p', label: '1080p only' },
-  { value: '720p', label: '720p only' },
-  { value: '2160p', label: '4K only' },
-  { value: 'any', label: 'Any resolution' }
-];
 const AUDIO_PREFERENCES = [
   { value: 'any', label: 'Any audio' },
   { value: 'english-dubbed-only', label: 'Explicit English Dub only' },
@@ -791,6 +786,7 @@ function App() {
   }
 
   const seasonOptions = selected?.seasonNumbers || Array.from({ length: selected?.seasons || 0 }, (_, index) => index + 1);
+  const resolutionLabel = getResolutionPreferenceLabel(resolutionPreference);
 
   return (
     <div className="app-shell">
@@ -829,7 +825,7 @@ function App() {
               <span className="card-arrow"><Icon name="arrow" size={14} /></span>
             </button>)}
           </div>}
-          <div className="search-hint"><span><Icon name="check" size={12} /> 1080p only</span><b>·</b><span><Icon name="trend" size={12} /> Smallest known size</span><b>·</b><span><Icon name="link" size={12} /> Magnet links</span></div>
+          <div className="search-hint"><span><Icon name="check" size={12} /> {resolutionLabel}</span><b>·</b><span><Icon name="trend" size={12} /> {rankingPreferenceHint(torrentioPreference)}</span><b>·</b><span><Icon name="link" size={12} /> Magnet links</span></div>
         </section>
 
         {notice && <div className="notice"><span className="notice-dot" />{notice}<button onClick={() => setNotice(null)}><Icon name="x" size={14} /></button></div>}
@@ -892,7 +888,7 @@ function App() {
               <div className="summary-panel">
                 <div className="summary-stat"><span className="summary-label">AVAILABLE</span><strong>{available}<small>/{episodes.length}</small></strong></div>
                 <div className="summary-progress"><div className="progress-label"><span>Season coverage</span><b>{progress}%</b></div><div className="progress-track"><i style={{ width: `${progress}%` }} /></div></div>
-                <div className="summary-chip"><span className="chip-dot" /> {providerMode === 'live' ? 'Torrentio live · 1080p only' : providerMode === 'partial' ? 'Torrentio partial · retry failed rows' : providerMode === 'error' ? 'Torrentio error · retry scan' : providerMode === 'demo' ? 'Preview fallback · 1080p only' : '1080p filter active'}</div>
+                <div className="summary-chip"><span className="chip-dot" /> {getResolutionSummaryCopy(providerMode, resolutionPreference)}</div>
               </div>
               {seasonIntegrity && <div className="integrity-panel">
                 <div><span className="section-kicker">SEASON INTEGRITY</span><strong>{seasonIntegrity.usableEpisodes} / {episodes.length} usable episodes</strong></div>
@@ -915,7 +911,7 @@ function App() {
                       <div className="magnet-line"><code>{item.magnet}</code><a href={item.magnet} aria-label="Open magnet">Open</a><button onClick={() => copyMagnet(item.magnet)} aria-label="Copy magnet"><Icon name="copy" size={14} /></button></div>
                       <p className="detail-note"><Icon name="bolt" size={13} /> {item.selectionReason || (providerMode === 'live' ? `${item.fallbackTrackersUsed ? 'Torrentio returned no trackers, so fallback trackers were added. ' : ''}The tracker magnet is recommended; use the raw magnet if your downloader manages its own tracker/DHT settings.` : 'Preview source selected by smallest known size.')}</p>
                       {geminiAnalysis[item.id] && <div className={`gemini-panel ${geminiAnalysis[item.id].error ? 'is-error' : ''}`}><div className="gemini-panel-heading"><span className="gemini-label">GEMINI ASSIST</span>{(geminiAnalysis[item.id].recommendation?.confidence || geminiAnalysis[item.id].confidence) && <strong>{geminiAnalysis[item.id].recommendation?.confidence || geminiAnalysis[item.id].confidence} confidence</strong>}</div>{geminiAnalysis[item.id].error ? <p>{geminiAnalysis[item.id].error}</p> : <><p>{geminiAnalysis[item.id].recommendation?.reason || geminiAnalysis[item.id].reason || 'No explanation returned.'}</p>{(geminiAnalysis[item.id].recommendation?.warnings || geminiAnalysis[item.id].warnings)?.length > 0 && <ul>{(geminiAnalysis[item.id].recommendation?.warnings || geminiAnalysis[item.id].warnings).map((warning, index) => <li key={`${item.id}-warning-${index}`}>{warning}</li>)}</ul>}<small>Torrentio’s deterministic selection remains the download source.</small></>}</div>}
-                    </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>{item.preview ? 'Preview data is not downloadable' : 'No valid 1080p source found'}</strong><span>{item.preview ? 'Torrentio was unavailable during this scan. Run Check sources again to retrieve a real magnet.' : (item.sourceError || 'Try again later — provider availability can change.')}</span></div></div>}
+                    </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>{item.preview ? 'Preview data is not downloadable' : getNoSourceCopy(resolutionPreference)}</strong><span>{item.preview ? 'Torrentio was unavailable during this scan. Run Check sources again to retrieve a real magnet.' : (item.sourceError || 'Try again later — provider availability can change.')}</span></div></div>}
                     <ReleaseComparison
                       item={item}
                       onSelect={candidate => setEpisodes(current => selectEpisodeRelease(current, item.id, candidate))}
@@ -931,7 +927,7 @@ function App() {
         )}
       </main>
 
-      <footer className="footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Metadata: Cinemeta live <i /> Sources: Torrentio proxy <i /> 1080p normalized</span></footer>
+      <footer className="footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Metadata: Cinemeta live <i /> Sources: Torrentio proxy <i /> {resolutionLabel}</span></footer>
       {toast && <div className="toast"><span className="toast-icon"><Icon name="check" size={14} /></span>{toast}</div>}
       {showAuth && supabase && <AuthPanel key={authMode} supabase={supabase} initialMode={authMode} onClose={() => { setShowAuth(false); setAuthMode('sign-in'); }} />}
       {showAdmin && isAdmin && <AdminDashboard supabase={supabase} onClose={() => setShowAdmin(false)} />}
