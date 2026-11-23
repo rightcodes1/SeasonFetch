@@ -25,13 +25,13 @@ jobs:
         run: npm run desktop:build
       - name: Launch app and verify UI and native IPC
         shell: pwsh
-        run: |
-          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222 --remote-allow-origins=*'
-          node scripts/desktop-smoke.mjs (Join-Path $PWD 'src-tauri/target/release/seasonfetch.exe')
+        run: ./scripts/desktop-smoke.ps1
       - name: Upload test executable
         uses: actions/upload-artifact@v4
         with:
           name: seasonfetch-test-exe-${{ github.sha }}
-          path: src-tauri/target/release/seasonfetch.exe
+          path: |
+            src-tauri/target/release/seasonfetch.exe
+            desktop-smoke-ui.txt
           if-no-files-found: error
           retention-days: 14
