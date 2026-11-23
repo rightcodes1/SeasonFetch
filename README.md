@@ -38,6 +38,14 @@ If a Stremio link reports `ERR_CONNECTION_REFUSED`, first open `http://127.0.0.1
 
 Only live Torrentio results produce downloadable magnets. When Torrentio is unavailable, SeasonFetch may show clearly labeled preview rows, but it no longer exposes their placeholder hashes as magnets because those hashes cannot resolve metadata and would remain stuck on “querying info.”
 
+## Download tray and FDM handoff
+
+After scanning, add an episode's currently selected release from its expanded source details, or add all available episode selections from the season toolbar. Manual release changes update already-trayed episodes in the current scan. The tray is a separate, in-memory selection and stays available while browsing other titles and seasons; it is cleared on page reload. It groups downloads by info hash and file index while retaining the episodes they serve. Removing a shared download removes all its listed episode references. After a new scan, add an episode again to refresh its saved snapshot. Copy the prepared magnets one per line.
+
+The tray prepares links; it does not communicate with FDM or confirm a queued transfer. Paste or import the copied entries in FDM if your installed version supports that workflow. Multi-magnet clipboard import on current FDM 6.x builds has not been verified. File-index (`so`) handling and multiple entries for the same torrent can vary by downloader; check the selected files in FDM before starting. Existing individual magnet, Stremio and season-wide text export actions remain available.
+
+Run `npm test` and `npm run build` for the standard checks. An optional mocked browser regression check is available with Python Playwright and Chromium installed: start `npm run dev`, then run `python3 scripts/test-fdm-handoff-browser.py` in another terminal. It intercepts API requests with local fixtures and does not contact FDM or modify production data; set `CHROMIUM_PATH` if Chromium is not on the PATH.
+
 Set `TORRENTIO_BASE_URL`, `CINEMETA_BASE_URL`, or `CLIENT_ORIGIN` to override production defaults. The proxy exposes `GET /api/health`, `GET /api/cinemeta/search?q=title`, `GET /api/cinemeta/series/:id`, and `GET /api/torrentio/season/:seriesId/:season?episodes=1,2,3`.
 
 Gemini is an optional server-side helper. Set `GEMINI_API_KEY` as a sensitive Vercel environment variable for Preview and Production; never put it in GitHub or browser code. The optional `GET /api/gemini/status` route reports configuration without revealing the key, `POST /api/gemini/search-assist` suggests corrected title spellings when direct Cinemeta search returns nothing, and `POST /api/gemini/explain-source` accepts candidate metadata for an explanation. Deterministic Torrentio ranking remains authoritative, and Gemini is not used to invent magnets, hashes, trackers, file indexes, or search results.

@@ -6,7 +6,10 @@ import AdminDashboard from './components/AdminDashboard.jsx';
 import AccountMenu from './components/AccountMenu.jsx';
 import { supabase } from './services/supabase.js';
 import ReleaseComparison from './components/ReleaseComparison.jsx';
+import DownloadTray from './components/DownloadTray.jsx';
 import { getEpisodeReleaseFields, getReleaseIdentity, restoreEpisodeRecommendation, selectEpisodeRelease } from './utils/releaseSelection.js';
+import { addDownloadSelections, createEpisodeDownloadSelection, removeDownloadSelection, serializeDownloadSelection } from './utils/downloadSelection.js';
+import { buildStremioDownloadLink, STREMIO_DOWNLOAD_ORIGIN } from './utils/downloadLinks.js';
 import { copyTextToClipboard } from './utils/clipboard.js';
 import { signOutFromAuth } from './utils/accountActions.js';
 import { createScanCoordinator } from './utils/scanCoordinator.js';
@@ -131,17 +134,11 @@ const SERIES = [
   }
 ];
 
-const STREMIO_DOWNLOAD_ORIGIN = 'http://127.0.0.1:11470';
 const AUDIO_PREFERENCES = [
   { value: 'any', label: 'Any audio' },
   { value: 'english-dubbed-only', label: 'Explicit English Dub only' },
   { value: 'english-dubbed-or-dual', label: 'English dubbed / dual audio' }
 ];
-
-function buildStremioDownloadLink(item) {
-  if (!item?.hash || !Number.isInteger(item.fileIdx) || item.fileIdx < 0) return '';
-  return `${STREMIO_DOWNLOAD_ORIGIN}/${encodeURIComponent(item.hash)}/${item.fileIdx}?external=1&download=1`;
-}
 
 const ICONS = {
   search: 'M11 11 20 20M13.5 6.5a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z',
@@ -210,6 +207,8 @@ function App() {
   const [selected, setSelected] = useState(null);
   const [season, setSeason] = useState(1);
   const [episodes, setEpisodes] = useState([]);
+  const [downloadSelections, setDownloadSelections] = useState([]);
+  const [trayMessage, setTrayMessage] = useState('');
   const [expanded, setExpanded] = useState({});
   const [searching, setSearching] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -259,6 +258,10 @@ function App() {
 
   const available = useMemo(() => episodes.filter(item => !['unavailable', 'provider-error'].includes(item.status)).length, [episodes]);
   const progress = episodes.length ? Math.round((available / episodes.length) * 100) : 0;
+  const trayCandidates = useMemo(() => {
+    const context = { seriesId: selected?.imdbId || selected?.id, seriesTitle: selected?.title, season };
+    return episodes.map(item => createEpisodeDownloadSelection(item, context)).filter(Boolean);
+  }, [episodes, selected, season]);
 
   function invalidateScan() {
     scanCoordinatorRef.current.invalidate();
@@ -688,6 +691,81 @@ function App() {
     } catch (error) { setNotice(error.message); }
   }
 
+  function syncEpisodeInTray(item) {
+    const seriesId = selected?.imdbId || selected?.id;
+    const hasReference = downloadSelections.some(download => download.references?.some(reference =>
+      reference.type === 'episode' && reference.mediaId === seriesId
+      && reference.season === season && reference.episode === item.number
+    ));
+    if (!hasReference) return;
+    const updated = createEpisodeDownloadSelection(item, { seriesId, seriesTitle: selected?.title, season });
+    if (updated) {
+      setDownloadSelections(current => addDownloadSelections(current, [updated]));
+      setTrayMessage(`Episode ${item.number} tray selection updated.`);
+    } else {
+      setTrayMessage(`Episode ${item.number} has no valid current magnet; its previously saved tray selection is unchanged.`);
+    }
+  }
+
+  function chooseEpisodeRelease(item, candidate) {
+    const next = selectEpisodeRelease([item], item.id, candidate)[0];
+    if (next === item) return;
+    setEpisodes(current => selectEpisodeRelease(current, item.id, candidate));
+    syncEpisodeInTray(next);
+  }
+
+  function restoreEpisodeRelease(item) {
+    const next = restoreEpisodeRecommendation([item], item.id)[0];
+    if (next === item) return;
+    setEpisodes(current => restoreEpisodeRecommendation(current, item.id));
+    syncEpisodeInTray(next);
+  }
+
+  function addEpisodeToTray(item) {
+    const selection = createEpisodeDownloadSelection(item, {
+      seriesId: selected?.imdbId || selected?.id,
+      seriesTitle: selected?.title,
+      season
+    });
+    if (!selection) {
+      setNotice('This episode does not have a valid, file-consistent live magnet to add.');
+      return;
+    }
+    setDownloadSelections(current => addDownloadSelections(current, [selection]));
+    setTrayMessage(`Episode ${item.number} selection saved to the tray.`);
+    setToast('Episode selection saved to tray');
+    window.setTimeout(() => setToast(''), 2400);
+  }
+
+  function addSeasonToTray() {
+    if (!trayCandidates.length) {
+      setTrayMessage('No valid live episode magnets are available to add.');
+      return;
+    }
+    setDownloadSelections(current => addDownloadSelections(current, trayCandidates));
+    const skipped = episodes.length - trayCandidates.length;
+    setTrayMessage(`${trayCandidates.length} episode selection${trayCandidates.length === 1 ? '' : 's'} saved${skipped ? `; ${skipped} unavailable or invalid episode${skipped === 1 ? '' : 's'} skipped` : ''}.`);
+    setToast('Available episode selections saved to tray');
+    window.setTimeout(() => setToast(''), 2400);
+  }
+
+  async function copyDownloadTray() {
+    const text = serializeDownloadSelection(downloadSelections);
+    if (!text) {
+      setTrayMessage('There are no valid download magnets to copy.');
+      return;
+    }
+    try {
+      await copyTextToClipboard(text);
+      const count = text.split('\n').length;
+      setTrayMessage(`${count} magnet${count === 1 ? '' : 's'} copied. Paste or import into your downloader if supported.`);
+      setToast('Download magnets copied');
+      window.setTimeout(() => setToast(''), 2400);
+    } catch (error) {
+      setTrayMessage(error.message || 'Clipboard access failed. Allow clipboard access and try again.');
+    }
+  }
+
   function getSeasonMagnets() {
     return episodes.filter(item => item.magnet && !item.preview).map(item => item.magnet);
   }
@@ -876,6 +954,7 @@ function App() {
                 <div className="select-wrap preference-wrap"><Icon name="trend" size={15} /><select value={torrentioPreference} onChange={event => changeTorrentioPreference(event.target.value)} aria-label="Choose Torrentio ranking preference">{RANKING_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
                 <div className="select-wrap preference-wrap"><Icon name="link" size={15} /><select value={audioPreference} onChange={event => changeAudioPreference(event.target.value)} aria-label="Choose audio filter">{AUDIO_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
                 <div className="select-wrap preference-wrap"><Icon name="spark" size={15} /><select value={resolutionPreference} onChange={event => changeResolutionPreference(event.target.value)} aria-label="Choose resolution filter">{RESOLUTION_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
+                <button className="secondary-button" onClick={addSeasonToTray} disabled={checking || !trayCandidates.length} title={!trayCandidates.length ? 'No valid live episode magnets available' : undefined}>Add available to tray</button>
                 <button className="secondary-button" onClick={copySeasonMagnets} disabled={checking || !episodes.length}><Icon name="copy" size={15} /> Copy season magnets</button>
                 <button className="secondary-button" onClick={downloadSeasonMagnets} disabled={checking || !episodes.length}><Icon name="down" size={15} /> Download .txt</button>
                 <button className="primary-button" onClick={checkSources} disabled={checking}>{checking ? <><span className="spinner spinner-dark" /> Scanning</> : <><Icon name="refresh" size={15} /> Check sources</>}</button>
@@ -906,7 +985,7 @@ function App() {
                   </div>
                   {expanded[item.id] && <div className="episode-details">
                     {item.magnet ? <>
-                      <div className="detail-top"><div><span className="detail-label">SELECTED SOURCE</span><strong>{item.format}</strong></div><div className="detail-actions">{item.sourceUrl && <a className="secondary-button small-button" href={item.sourceUrl} target="_blank" rel="noreferrer">Open source <Icon name="arrow" size={13} /></a>}{buildStremioDownloadLink(item) && <><button className="secondary-button small-button" onClick={checkStremioConnection}><Icon name="bolt" size={14} /> Check Stremio</button><a className="primary-button small-button" href={buildStremioDownloadLink(item)}>Open Stremio download <Icon name="arrow" size={13} /></a><button className="secondary-button small-button" onClick={() => copyStremioLink(item)}><Icon name="copy" size={14} /> Copy Stremio link</button></>}<a className="secondary-button small-button" href={item.magnet}>Open magnet <Icon name="link" size={13} /></a><button className="secondary-button small-button" onClick={() => copyMagnet(item.magnet)}><Icon name="copy" size={14} /> Copy magnet with trackers</button>{item.rawMagnet && <button className="secondary-button small-button" onClick={() => copyRawMagnet(item)}><Icon name="copy" size={14} /> Copy raw magnet</button>}<button className="secondary-button small-button" onClick={() => analyzeWithGemini(item)} disabled={geminiLoading[item.id]}><Icon name="bolt" size={14} /> {geminiLoading[item.id] ? 'Analyzing…' : 'Analyze with Gemini'}</button></div></div>
+                      <div className="detail-top"><div><span className="detail-label">SELECTED SOURCE</span><strong>{item.format}</strong></div><div className="detail-actions">{item.sourceUrl && <a className="secondary-button small-button" href={item.sourceUrl} target="_blank" rel="noreferrer">Open source <Icon name="arrow" size={13} /></a>}{buildStremioDownloadLink(item) && <><button className="secondary-button small-button" onClick={checkStremioConnection}><Icon name="bolt" size={14} /> Check Stremio</button><a className="primary-button small-button" href={buildStremioDownloadLink(item)}>Open Stremio download <Icon name="arrow" size={13} /></a><button className="secondary-button small-button" onClick={() => copyStremioLink(item)}><Icon name="copy" size={14} /> Copy Stremio link</button></>}<a className="secondary-button small-button" href={item.magnet}>Open magnet <Icon name="link" size={13} /></a><button className="secondary-button small-button" onClick={() => copyMagnet(item.magnet)}><Icon name="copy" size={14} /> Copy magnet with trackers</button>{item.rawMagnet && <button className="secondary-button small-button" onClick={() => copyRawMagnet(item)}><Icon name="copy" size={14} /> Copy raw magnet</button>}<button className="secondary-button small-button" onClick={() => addEpisodeToTray(item)} disabled={!trayCandidates.some(candidate => candidate.references?.some(reference => reference.episode === item.number && reference.season === season))}>Add selected release to tray</button><button className="secondary-button small-button" onClick={() => analyzeWithGemini(item)} disabled={geminiLoading[item.id]}><Icon name="bolt" size={14} /> {geminiLoading[item.id] ? 'Analyzing…' : 'Analyze with Gemini'}</button></div></div>
                       <div className="detail-meta"><span><b>Resolution</b>{item.resolution || 'Unknown'}</span><span><b>File size</b>{item.size}</span>{item.audio && <span><b>Audio</b>{item.audio === 'dual-audio' ? 'Dual audio' : 'English dubbed'}</span>}<span><b>Audio evidence</b>{item.audioEvidence === 'explicit-english-dub' ? 'Explicit English Dub' : item.audioEvidence === 'possible-english-audio' ? 'Possible English Audio' : 'Unverified'}</span>{item.releaseType && <span><b>Release</b>{item.releaseType}</span>}{item.seeders !== null && <span><b>Seeders</b>{item.seeders.toLocaleString()}</span>}{item.provider && <span><b>Provider</b>{item.provider}</span>}{item.intelligence && <span><b>Validated</b>{item.intelligence.validatedCount} · {item.intelligence.duplicateGroupCount} groups</span>}<span><b>Info hash</b>{item.hash.slice(0, 12)}…</span>{item.fileIdx !== null && <span><b>File index</b>{item.fileIdx}</span>}{item.trackerCount > 0 && <span><b>Trackers</b>{item.trackerCount}</span>}</div>
                       <div className="magnet-line"><code>{item.magnet}</code><a href={item.magnet} aria-label="Open magnet">Open</a><button onClick={() => copyMagnet(item.magnet)} aria-label="Copy magnet"><Icon name="copy" size={14} /></button></div>
                       <p className="detail-note"><Icon name="bolt" size={13} /> {item.selectionReason || (providerMode === 'live' ? `${item.fallbackTrackersUsed ? 'Torrentio returned no trackers, so fallback trackers were added. ' : ''}The tracker magnet is recommended; use the raw magnet if your downloader manages its own tracker/DHT settings.` : 'Preview source selected by smallest known size.')}</p>
@@ -914,8 +993,8 @@ function App() {
                     </> : <div className="empty-source"><Icon name="x" size={17} /><div><strong>{item.preview ? 'Preview data is not downloadable' : getNoSourceCopy(resolutionPreference)}</strong><span>{item.preview ? 'Torrentio was unavailable during this scan. Run Check sources again to retrieve a real magnet.' : (item.sourceError || 'Try again later — provider availability can change.')}</span></div></div>}
                     <ReleaseComparison
                       item={item}
-                      onSelect={candidate => setEpisodes(current => selectEpisodeRelease(current, item.id, candidate))}
-                      onRestore={() => setEpisodes(current => restoreEpisodeRecommendation(current, item.id))}
+                      onSelect={candidate => chooseEpisodeRelease(item, candidate)}
+                      onRestore={() => restoreEpisodeRelease(item)}
                     />
                   </div>}
                 </div>)}
@@ -925,6 +1004,13 @@ function App() {
             {!episodes.length && !checking && <div className="pre-scan"><div className="pre-scan-icon"><Icon name="bolt" size={21} /></div><div><strong>Ready to scan {selected.title}</strong><span>Select a season and check sources to see episode availability.</span></div><button className="text-action" onClick={checkSources}>Run first scan <Icon name="arrow" size={14} /></button></div>}
           </section>
         )}
+        <DownloadTray
+          selections={downloadSelections}
+          message={trayMessage}
+          onCopy={copyDownloadTray}
+          onRemove={key => { setDownloadSelections(current => removeDownloadSelection(current, key)); setTrayMessage('Download removed from the tray.'); }}
+          onClear={() => { setDownloadSelections([]); setTrayMessage('Download tray cleared.'); }}
+        />
       </main>
 
       <footer className="footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Metadata: Cinemeta live <i /> Sources: Torrentio proxy <i /> {resolutionLabel}</span></footer>

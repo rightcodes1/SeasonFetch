@@ -416,3 +416,35 @@ h1 span { color: #b28dfc; }
 .admin-user-row, .admin-log-row { display: grid; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid #ffffff0d; }.admin-user-row { grid-template-columns: minmax(0, 1fr) auto auto; }.admin-user-row:last-child, .admin-log-row:last-child { border-bottom: 0; }
 .admin-user-row strong, .admin-log-row strong { display: block; color: #e4deec; font-size: 11px; }.admin-user-row span:not(.admin-pill), .admin-log-row span, .admin-log-row time, .admin-log-row code { display: block; overflow: hidden; color: #847c8e; font: 9px 'DM Mono', monospace; text-overflow: ellipsis; white-space: nowrap; }.admin-pill { padding: 4px 7px; border: 1px solid #7bd29b38; border-radius: 5px; color: #91d8a9; background: #7bd29b12; font-size: 9px; }.admin-pill.suspended { border-color: #d8838e45; color: #e3a1aa; background: #d8838e12; }.admin-log-row { grid-template-columns: 160px 1fr 170px; }.admin-log-row code { grid-column: 1 / -1; }
 @media (max-width: 560px) { .account-dropdown { right: -4px; }.profile-panel { padding: 25px 19px; }.profile-stats { grid-template-columns: 1fr; }.admin-user-row { grid-template-columns: 1fr auto; }.admin-user-row .small-button { grid-column: 1 / -1; }.admin-log-row { grid-template-columns: 1fr; }.admin-log-row code { grid-column: auto; } }
+
+/* Download tray */
+.download-tray { margin: 0 0 67px; padding: 22px; border: 1px solid #ffffff12; border-radius: 16px; background: linear-gradient(135deg, #1a1921, #14151a); box-shadow: 0 14px 40px #0000001e; }
+.download-tray-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.download-tray-heading h2 { margin: 6px 0 4px; color: #f2f0f6; font: 600 23px 'Space Grotesk', sans-serif; letter-spacing: -.8px; }
+.download-tray-count { margin: 0; color: #aaa2b5; font-size: 11px; }
+.download-tray-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.download-tray-actions button { min-height: 40px; font-size: 11px; }
+.download-tray-intro { margin: 16px 0 0; color: #a49daa; font-size: 11px; line-height: 1.55; }
+.download-tray-status.has-message { margin-top: 14px; padding: 10px 12px; border: 1px solid #a98af538; border-radius: 8px; color: #dacaf8; background: #a98af513; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.download-tray-list { display: grid; gap: 8px; margin: 16px 0 0; padding: 0; list-style: none; }
+.download-tray-item { min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 13px 14px; border: 1px solid #ffffff12; border-radius: 9px; background: #0f1014; }
+.download-tray-item-content { min-width: 0; flex: 1; }
+.download-tray-release { display: block; color: #e7e2ed; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.download-tray-references { display: grid; gap: 6px; margin: 9px 0 0; padding: 0; color: #aaa3b1; font-size: 11px; line-height: 1.45; list-style: none; }
+.download-tray-references li { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; overflow-wrap: anywhere; }
+.download-tray-manual { padding: 3px 6px; border: 1px solid #dcb46f42; border-radius: 5px; color: #e0bd7f; background: #dcb46f10; font-size: 9px; }
+.download-tray-no-references { margin: 8px 0 0; color: #918a99; font-size: 11px; }
+.download-tray-remove { flex: 0 0 auto; min-height: 34px; padding: 8px 10px; font-size: 10px; }
+.download-tray-empty { margin: 16px 0 0; padding: 15px; border: 1px dashed #ffffff1b; border-radius: 9px; color: #a49daa; background: #111216; font-size: 11px; line-height: 1.5; }
+.download-tray-notes { display: grid; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid #ffffff10; }
+.download-tray-notes p { margin: 0; color: #a39ba9; font-size: 10px; line-height: 1.6; }
+.download-tray-notes code { color: #cbb9ee; font-family: 'DM Mono', monospace; }
+@media (max-width: 560px) {
+  .download-tray { margin-bottom: 50px; padding: 17px; }
+  .download-tray-heading { align-items: flex-start; flex-direction: column; gap: 14px; }
+  .download-tray-actions { width: 100%; justify-content: flex-start; }
+  .download-tray-actions button { flex: 1; }
+  .download-tray-item { flex-wrap: wrap; gap: 10px; }
+  .download-tray-item-content { flex-basis: 100%; }
+  .download-tray-remove { margin-left: auto; }
+}
