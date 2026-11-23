@@ -63,13 +63,38 @@ export async function supabaseRpc(name, args, token) {
   return data;
 }
 
-export async function requireUser(req, res, next) {
-  try {
-    const token = getBearerToken(req);
-    req.supabaseToken = token;
-    req.supabaseUser = await verifySupabaseToken(token);
-    return next();
-  } catch {
-    return res.status(401).json({ error: 'A valid Supabase access token is required.' });
-  }
+async function isAccountSuspended(userId, token) {
+  const rows = await supabaseRequest(
+    `account_suspensions?select=suspended&user_id=eq.${encodeURIComponent(userId)}&limit=1`,
+    token
+  );
+  return Array.isArray(rows) && rows.some(row => row.suspended === true);
 }
+
+export function createRequireUser({ verifyToken = verifySupabaseToken, checkSuspension = isAccountSuspended } = {}) {
+  return async function requireUserMiddleware(req, res, next) {
+    const token = getBearerToken(req);
+    let user;
+    try {
+      user = await verifyToken(token);
+      if (!user?.sub) throw new Error('Invalid Supabase access token.');
+    } catch {
+      return res.status(401).json({ error: 'A valid Supabase access token is required.' });
+    }
+
+    try {
+      if (await checkSuspension(user.sub, token)) {
+        return res.status(403).json({ error: 'Account suspended.' });
+      }
+    } catch (error) {
+      console.error('Account status verification failed:', error.message);
+      return res.status(503).json({ error: 'Unable to verify account status. Please try again shortly.' });
+    }
+
+    req.supabaseToken = token;
+    req.supabaseUser = user;
+    return next();
+  };
+}
+
+export const requireUser = createRequireUser();

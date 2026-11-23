@@ -3,6 +3,7 @@ import { validateRelease } from "./validation/validateRelease.js";
 import { validateEpisode } from "./validation/validateEpisode.js";
 import { identifyDuplicates } from "./deduplication/identifyDuplicates.js";
 import { rankReleases } from "./ranking/rankReleases.js";
+import { normalizeRankingPreference } from "../../shared/rankingPreferences.js";
 
 function matchesHardFilters(release, { resolution = "1080p", maxSizeBytes = null, minSeeders = null, codec = null, hdr = null, audioMode = "any" } = {}) {
   if (resolution !== "any" && release.resolution !== resolution) return false;
@@ -16,10 +17,7 @@ function matchesHardFilters(release, { resolution = "1080p", maxSizeBytes = null
 }
 
 export function recommendationProfileForPreference(preference = "default") {
-  if (["smallest", "smallest-acceptable", "default"].includes(preference)) return "smallest-acceptable";
-  if (["seeders", "most-reliable"].includes(preference)) return "most-reliable";
-  if (["quality", "highest-quality"].includes(preference)) return "highest-quality";
-  return "best-overall";
+  return normalizeRankingPreference(preference);
 }
 
 export function processReleases(rawResults = [], { season = null, episode = null, profile = "best-overall", filters = {}, audioMode = "any" } = {}) {
@@ -39,7 +37,9 @@ export function processReleases(rawResults = [], { season = null, episode = null
       bestOverall: rankReleases(eligible, "best-overall")[0] || null,
       smallestAcceptable: rankReleases(eligible, "smallest-acceptable")[0] || null,
       highestQuality: rankReleases(eligible, "highest-quality")[0] || null,
-      mostReliable: rankReleases(eligible, "most-reliable")[0] || null
+      mostReliable: rankReleases(eligible, "most-reliable")[0] || null,
+      balanced: rankReleases(eligible, "balanced")[0] || null,
+      prefer1337x: rankReleases(eligible, "prefer-1337x")[0] || null
     },
     episode: validateEpisode(validated)
   };

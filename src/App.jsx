@@ -7,6 +7,10 @@ import AccountMenu from './components/AccountMenu.jsx';
 import { supabase } from './services/supabase.js';
 import ReleaseComparison from './components/ReleaseComparison.jsx';
 import { getEpisodeReleaseFields, getReleaseIdentity, restoreEpisodeRecommendation, selectEpisodeRelease } from './utils/releaseSelection.js';
+import { copyTextToClipboard } from './utils/clipboard.js';
+import { signOutFromAuth } from './utils/accountActions.js';
+import { createScanCoordinator } from './utils/scanCoordinator.js';
+import { normalizeRankingPreference, RANKING_PREFERENCES } from '../shared/rankingPreferences.js';
 
 const SERIES = [
   {
@@ -125,14 +129,6 @@ const SERIES = [
 ];
 
 const STREMIO_DOWNLOAD_ORIGIN = 'http://127.0.0.1:11470';
-const TORRENTIO_PREFERENCES = [
-  { value: 'best-overall', label: 'Best Overall' },
-  { value: 'smallest-acceptable', label: 'Smallest Acceptable' },
-  { value: 'most-reliable', label: 'Most Reliable' },
-  { value: '1337x', label: 'Prefer 1337x' },
-  { value: 'balanced', label: 'Balanced' },
-  { value: 'quality', label: 'Highest quality' }
-];
 const RESOLUTION_PREFERENCES = [
   { value: '1080p', label: '1080p only' },
   { value: '720p', label: '720p only' },
@@ -236,11 +232,14 @@ function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const searchRequestRef = useRef(0);
+  const suggestionRequestRef = useRef(0);
+  const suggestionTimerRef = useRef(null);
   const metadataRequestRef = useRef(0);
-  const scanRequestRef = useRef(0);
+  const scanCoordinatorRef = useRef(null);
+  if (!scanCoordinatorRef.current) scanCoordinatorRef.current = createScanCoordinator({ onCheckingChange: setChecking });
   const [torrentioPreference, setTorrentioPreference] = useState(() => {
     const stored = window.localStorage.getItem('seasonfetch:torrentio-preference');
-    return TORRENTIO_PREFERENCES.some(option => option.value === stored) ? stored : 'default';
+    return normalizeRankingPreference(stored);
   });
   const [audioPreference, setAudioPreference] = useState(() => {
     const stored = window.localStorage.getItem('seasonfetch:audio-preference');
@@ -251,9 +250,32 @@ function App() {
     return RESOLUTION_PREFERENCES.some(option => option.value === stored) ? stored : '1080p';
   });
   const [seasonIntegrity, setSeasonIntegrity] = useState(null);
+  const scanContextRef = useRef(null);
+  scanContextRef.current = {
+    seriesId: selected?.imdbId || null,
+    season,
+    preference: torrentioPreference,
+    audioPreference,
+    resolutionPreference
+  };
 
   const available = useMemo(() => episodes.filter(item => !['unavailable', 'provider-error'].includes(item.status)).length, [episodes]);
   const progress = episodes.length ? Math.round((available / episodes.length) * 100) : 0;
+
+  function invalidateScan() {
+    scanCoordinatorRef.current.invalidate();
+  }
+
+  function scanContextMatches(expected) {
+    const current = scanContextRef.current;
+    return current.seriesId === expected.seriesId
+      && current.season === expected.season
+      && current.preference === expected.preference
+      && current.audioPreference === expected.audioPreference
+      && current.resolutionPreference === expected.resolutionPreference;
+  }
+
+  useEffect(() => () => scanCoordinatorRef.current?.invalidate(), []);
 
   useEffect(() => {
     if (!supabase) return undefined;
@@ -299,9 +321,17 @@ function App() {
   }, [user]);
 
   async function signOut() {
-    if (supabase) await supabase.auth.signOut();
-    setToast('Signed out');
-    window.setTimeout(() => setToast(''), 2200);
+    if (!supabase) {
+      setNotice('Sign-out is unavailable because Supabase authentication is not configured.');
+      return;
+    }
+    try {
+      await signOutFromAuth(supabase.auth);
+      setToast('Signed out');
+      window.setTimeout(() => setToast(''), 2200);
+    } catch (error) {
+      setNotice(`Unable to sign out: ${error.message || 'Supabase did not confirm sign-out.'}`);
+    }
   }
 
   function decorateResults(items) {
@@ -327,25 +357,33 @@ function App() {
     if (cleanQuery.length < 2) {
       setSearchSuggestions([]);
       setSuggestionsLoading(false);
+      if (suggestionTimerRef.current !== null) {
+        window.clearTimeout(suggestionTimerRef.current);
+        suggestionTimerRef.current = null;
+      }
       return undefined;
     }
 
     let active = true;
+    const requestId = ++suggestionRequestRef.current;
     setSuggestionsLoading(true);
     const timer = window.setTimeout(async () => {
+      suggestionTimerRef.current = null;
       try {
         const data = await cinemeta.search(cleanQuery);
-        if (active) setSearchSuggestions(decorateResults(data.results || []).slice(0, 5));
+        if (active && requestId === suggestionRequestRef.current) setSearchSuggestions(decorateResults(data.results || []).slice(0, 5));
       } catch {
-        if (active) setSearchSuggestions([]);
+        if (active && requestId === suggestionRequestRef.current) setSearchSuggestions([]);
       } finally {
-        if (active) setSuggestionsLoading(false);
+        if (active && requestId === suggestionRequestRef.current) setSuggestionsLoading(false);
       }
     }, 280);
+    suggestionTimerRef.current = timer;
 
     return () => {
       active = false;
       window.clearTimeout(timer);
+      if (suggestionTimerRef.current === timer) suggestionTimerRef.current = null;
     };
   }, [query]);
 
@@ -367,6 +405,13 @@ function App() {
 
   function runSearch(event, overrideQuery) {
     event?.preventDefault();
+    invalidateScan();
+    suggestionRequestRef.current += 1;
+    if (suggestionTimerRef.current !== null) {
+      window.clearTimeout(suggestionTimerRef.current);
+      suggestionTimerRef.current = null;
+    }
+    setSuggestionsLoading(false);
     const cleanQuery = String(overrideQuery ?? query).trim().toLowerCase();
     const requestId = ++searchRequestRef.current;
     setSearchTouched(true);
@@ -417,7 +462,7 @@ function App() {
   }
 
   async function chooseSeries(series) {
-    scanRequestRef.current += 1;
+    invalidateScan();
     const requestId = ++metadataRequestRef.current;
     const local = SERIES.find(item => item.imdbId === series.imdbId || item.id === series.id);
     const baseSeasonCount = Number(series.seasons || local?.seasons || 1);
@@ -468,7 +513,7 @@ function App() {
   }
 
   function changeTorrentioPreference(value) {
-    scanRequestRef.current += 1;
+    invalidateScan();
     setTorrentioPreference(value);
     window.localStorage.setItem('seasonfetch:torrentio-preference', value);
     setEpisodes([]);
@@ -478,7 +523,7 @@ function App() {
   }
 
   function changeAudioPreference(value) {
-    scanRequestRef.current += 1;
+    invalidateScan();
     setAudioPreference(value);
     window.localStorage.setItem('seasonfetch:audio-preference', value);
     setEpisodes([]);
@@ -488,7 +533,7 @@ function App() {
   }
 
   function changeResolutionPreference(value) {
-    scanRequestRef.current += 1;
+    invalidateScan();
     setResolutionPreference(value);
     window.localStorage.setItem('seasonfetch:resolution-preference', value);
     setEpisodes([]);
@@ -499,13 +544,12 @@ function App() {
 
   function checkSources() {
     if (!selected) return;
-    const requestId = ++scanRequestRef.current;
     const scanSeriesId = selected.imdbId;
     const scanSeason = season;
     const scanPreference = torrentioPreference;
     const scanAudioPreference = audioPreference;
     const scanResolutionPreference = resolutionPreference;
-    setChecking(true);
+    invalidateScan();
     setEpisodes([]);
     setSeasonIntegrity(null);
     setExpanded({});
@@ -520,6 +564,13 @@ function App() {
     }
 
     const episodeNumbers = baseRows.map(getEpisodeNumber);
+    const scanContext = {
+      seriesId: scanSeriesId,
+      season: scanSeason,
+      preference: scanPreference,
+      audioPreference: scanAudioPreference,
+      resolutionPreference: scanResolutionPreference
+    };
 
     const makeDemoRows = () => baseRows.map((row, index) => ({
       id: `${selected.id}-${season}-${index + 1}`,
@@ -572,60 +623,77 @@ function App() {
       };
     });
 
-    window.setTimeout(() => {
-      torrentio.getSeasonSources(selected.imdbId, season, episodeNumbers, torrentioPreference, audioPreference, { resolution: scanResolutionPreference })
-        .then(data => {
-          if (requestId !== scanRequestRef.current || selected?.imdbId !== scanSeriesId || season !== scanSeason || torrentioPreference !== scanPreference || audioPreference !== scanAudioPreference || resolutionPreference !== scanResolutionPreference) return;
-          setEpisodes(mapProviderRows(data.results || []));
-          setSeasonIntegrity(data.integrity || null);
-          setProviderMode(data.status === 'partial' ? 'partial' : data.status === 'error' ? 'error' : 'live');
-          setChecking(false);
-          if (data.status === 'partial') setNotice(`${data.providerErrors} episode source request${data.providerErrors === 1 ? '' : 's'} failed; successful Torrentio results are still shown.`);
-          if (data.status === 'error') setNotice('Torrentio could not answer the episode requests. Try the scan again later.');
-          setToast(`Season ${season} Torrentio scan complete`);
-          window.setTimeout(() => setToast(''), 2600);
-        })
-        .catch(error => {
-          if (requestId !== scanRequestRef.current || selected?.imdbId !== scanSeriesId || season !== scanSeason || torrentioPreference !== scanPreference || audioPreference !== scanAudioPreference) return;
-          console.warn('Torrentio lookup failed; using preview data.', error);
-          setEpisodes(makeDemoRows());
-          setSeasonIntegrity(null);
-          setProviderMode('demo');
-          setChecking(false);
-          setNotice('Torrentio is unavailable right now, so preview source data is shown instead.');
-          setToast('Showing preview fallback data');
-          window.setTimeout(() => setToast(''), 2600);
-        });
-    }, 760);
+    scanCoordinatorRef.current.start({
+      delayMs: 760,
+      request: signal => torrentio.getSeasonSources(
+        scanSeriesId,
+        scanSeason,
+        episodeNumbers,
+        scanPreference,
+        scanAudioPreference,
+        { resolution: scanResolutionPreference },
+        { signal }
+      ),
+      onSuccess: data => {
+        if (!scanContextMatches(scanContext)) { invalidateScan(); return; }
+        setEpisodes(mapProviderRows(data.results || []));
+        setSeasonIntegrity(data.integrity || null);
+        setProviderMode(data.status === 'partial' ? 'partial' : data.status === 'error' ? 'error' : 'live');
+        if (data.status === 'partial') setNotice(`${data.providerErrors} episode source request${data.providerErrors === 1 ? '' : 's'} failed; successful Torrentio results are still shown.`);
+        if (data.status === 'error') setNotice('Torrentio could not answer the episode requests. Try the scan again later.');
+        setToast(`Season ${scanSeason} Torrentio scan complete`);
+        window.setTimeout(() => setToast(''), 2600);
+      },
+      onError: error => {
+        if (!scanContextMatches(scanContext)) { invalidateScan(); return; }
+        if (error?.name === 'AbortError') return;
+        console.warn('Torrentio lookup failed; using preview data.', error);
+        setEpisodes(makeDemoRows());
+        setSeasonIntegrity(null);
+        setProviderMode('demo');
+        setNotice('Torrentio is unavailable right now, so preview source data is shown instead.');
+        setToast('Showing preview fallback data');
+        window.setTimeout(() => setToast(''), 2600);
+      }
+    });
   }
 
-  function copyMagnet(magnet) {
+  async function copyMagnet(magnet) {
     if (!magnet) return;
-    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(magnet).catch(() => {});
-    setToast('Magnet link copied to clipboard');
-    window.setTimeout(() => setToast(''), 2400);
+    try {
+      await copyTextToClipboard(magnet);
+      setNotice(null);
+      setToast('Magnet link copied to clipboard');
+      window.setTimeout(() => setToast(''), 2400);
+    } catch (error) { setNotice(error.message); }
   }
 
-  function copyRawMagnet(item) {
+  async function copyRawMagnet(item) {
     if (!item?.rawMagnet) return;
-    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(item.rawMagnet).catch(() => {});
-    setToast('Raw magnet link copied');
-    window.setTimeout(() => setToast(''), 2400);
+    try {
+      await copyTextToClipboard(item.rawMagnet);
+      setNotice(null);
+      setToast('Raw magnet link copied');
+      window.setTimeout(() => setToast(''), 2400);
+    } catch (error) { setNotice(error.message); }
   }
 
   function getSeasonMagnets() {
     return episodes.filter(item => item.magnet && !item.preview).map(item => item.magnet);
   }
 
-  function copySeasonMagnets() {
+  async function copySeasonMagnets() {
     const magnets = getSeasonMagnets();
     if (!magnets.length) {
       setNotice('No live Torrentio magnets are available for this season yet. Run Check sources first.');
       return;
     }
-    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(magnets.join('\n')).catch(() => {});
-    setToast(`${magnets.length} season magnet${magnets.length === 1 ? '' : 's'} copied`);
-    window.setTimeout(() => setToast(''), 2400);
+    try {
+      await copyTextToClipboard(magnets.join('\n'));
+      setNotice(null);
+      setToast(`${magnets.length} season magnet${magnets.length === 1 ? '' : 's'} copied`);
+      window.setTimeout(() => setToast(''), 2400);
+    } catch (error) { setNotice(error.message); }
   }
 
   function downloadSeasonMagnets() {
@@ -648,12 +716,15 @@ function App() {
     window.setTimeout(() => setToast(''), 2400);
   }
 
-  function copyStremioLink(item) {
+  async function copyStremioLink(item) {
     const link = buildStremioDownloadLink(item);
     if (!link) return;
-    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(link).catch(() => {});
-    setToast('Stremio download link copied');
-    window.setTimeout(() => setToast(''), 2400);
+    try {
+      await copyTextToClipboard(link);
+      setNotice(null);
+      setToast('Stremio download link copied');
+      window.setTimeout(() => setToast(''), 2400);
+    } catch (error) { setNotice(error.message); }
   }
 
   async function checkStremioConnection() {
@@ -698,6 +769,7 @@ function App() {
   }
 
   function reset() {
+    invalidateScan();
     setQuery('');
     setResults([]);
     setSelected(null);
@@ -723,7 +795,7 @@ function App() {
           <div className="topbar-right">
           <span className="live-indicator"><i /> Live discovery</span>
           <span className="topbar-label">TV SOURCE DISCOVERY</span>
-          {user ? <AccountMenu supabase={supabase} user={user} profile={profile} isAdmin={isAdmin} onAdmin={() => setShowAdmin(true)} onSignOut={signOut} onProfileUpdated={setProfile} /> : <button className="account-trigger account-sign-in" onClick={() => setShowAuth(true)}>Sign in</button>}
+          {user ? <AccountMenu supabase={supabase} user={user} profile={profile} isAdmin={isAdmin} onAdmin={() => setShowAdmin(true)} onSignOut={signOut} onProfileUpdated={setProfile} /> : <button className="account-trigger account-sign-in" onClick={() => { if (supabase) setShowAuth(true); else setNotice('Sign-in is unavailable because Supabase authentication is not configured for this deployment.'); }}>Sign in</button>}
         </div>
       </header>
 
@@ -789,14 +861,14 @@ function App() {
                 <p className="synopsis">{selected.synopsis}</p>
                 <div className="genre-row">{(selected.genres || []).map(genre => <span key={genre}>{genre}</span>)}</div>
               </div>
-              <button className="change-button" onClick={() => { setSelected(null); setEpisodes([]); setResults(SERIES); }}>Change series <Icon name="arrow" size={14} /></button>
+              <button className="change-button" onClick={() => { invalidateScan(); setSelected(null); setEpisodes([]); setResults(SERIES); }}>Change series <Icon name="arrow" size={14} /></button>
             </div>
 
             <div className="season-toolbar">
               <div><span className="section-kicker">EPISODE SOURCES</span><h2>Season results</h2></div>
               <div className="season-controls">
-                <div className="select-wrap"><Icon name="filter" size={15} /><select value={season} onChange={event => { scanRequestRef.current += 1; setSeason(Number(event.target.value)); setEpisodes([]); setExpanded({}); setProviderMode('ready'); }} aria-label="Choose season">{seasonOptions.map(item => <option key={item} value={item}>{item === 0 ? 'Specials' : `Season ${item}`}</option>)}</select><Icon name="down" size={14} /></div>
-                <div className="select-wrap preference-wrap"><Icon name="trend" size={15} /><select value={torrentioPreference} onChange={event => changeTorrentioPreference(event.target.value)} aria-label="Choose Torrentio ranking preference">{TORRENTIO_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
+                <div className="select-wrap"><Icon name="filter" size={15} /><select value={season} onChange={event => { invalidateScan(); setSeason(Number(event.target.value)); setEpisodes([]); setExpanded({}); setProviderMode('ready'); }} aria-label="Choose season">{seasonOptions.map(item => <option key={item} value={item}>{item === 0 ? 'Specials' : `Season ${item}`}</option>)}</select><Icon name="down" size={14} /></div>
+                <div className="select-wrap preference-wrap"><Icon name="trend" size={15} /><select value={torrentioPreference} onChange={event => changeTorrentioPreference(event.target.value)} aria-label="Choose Torrentio ranking preference">{RANKING_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
                 <div className="select-wrap preference-wrap"><Icon name="link" size={15} /><select value={audioPreference} onChange={event => changeAudioPreference(event.target.value)} aria-label="Choose audio filter">{AUDIO_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
                 <div className="select-wrap preference-wrap"><Icon name="spark" size={15} /><select value={resolutionPreference} onChange={event => changeResolutionPreference(event.target.value)} aria-label="Choose resolution filter">{RESOLUTION_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
                 <button className="secondary-button" onClick={copySeasonMagnets} disabled={checking || !episodes.length}><Icon name="copy" size={15} /> Copy season magnets</button>

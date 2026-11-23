@@ -28,7 +28,7 @@ async function requestStreams(seriesId, season, episode) {
   return Array.isArray(data.streams) ? data.streams : [];
 }
 
-export async function getEpisodeSources(seriesId, season, episode, preference = "default", audioMode = "any", filters = {}) {
+export async function getEpisodeSources(seriesId, season, episode, preference = "smallest-acceptable", audioMode = "any", filters = {}) {
   const streams = await requestStreams(seriesId, season, episode);
   const intelligence = processTorrentioResults(streams, {
     season,
@@ -59,10 +59,15 @@ export async function getEpisodeSources(seriesId, season, episode, preference = 
 }
 
 function recommendationKey(preference) {
-  if (["smallest", "smallest-acceptable", "default"].includes(preference)) return "smallestAcceptable";
-  if (["seeders", "most-reliable"].includes(preference)) return "mostReliable";
-  if (["quality", "highest-quality"].includes(preference)) return "highestQuality";
-  return "bestOverall";
+  const profile = recommendationProfileForPreference(preference);
+  return {
+    "best-overall": "bestOverall",
+    "smallest-acceptable": "smallestAcceptable",
+    "most-reliable": "mostReliable",
+    "prefer-1337x": "prefer1337x",
+    balanced: "balanced",
+    "highest-quality": "highestQuality"
+  }[profile];
 }
 
 function selectionReason(release) {
@@ -74,7 +79,7 @@ function selectionReason(release) {
   ].join(", ");
 }
 
-export async function getSeasonSources(seriesId, season, episodeNumbers, preference = "default", audioMode = "any", filters = {}) {
+export async function getSeasonSources(seriesId, season, episodeNumbers, preference = "smallest-acceptable", audioMode = "any", filters = {}) {
   const requestedEpisodes = Array.isArray(episodeNumbers)
     ? episodeNumbers.filter(number => Number.isInteger(number) && number > 0).slice(0, 30)
     : Array.from({ length: Math.min(Math.max(Number(episodeNumbers) || 0, 0), 30) }, (_, index) => index + 1);

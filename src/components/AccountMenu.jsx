@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import ProfilePanel from './ProfilePanel.jsx';
+import { getAvatarPresentation } from '../utils/profileAvatar.js';
 
 export default function AccountMenu({ supabase, user, profile, isAdmin, onAdmin, onSignOut, onProfileUpdated }) {
   const [open, setOpen] = useState(false);
@@ -14,13 +15,15 @@ export default function AccountMenu({ supabase, user, profile, isAdmin, onAdmin,
   }, []);
 
   const initial = (profile?.display_name || profile?.username || user.email || 'U').slice(0, 1).toUpperCase();
-  const avatarUrl = profile?.avatar_path ? supabase.storage.from('avatars').getPublicUrl(profile.avatar_path).data.publicUrl : '';
+  const avatarPath = profile?.avatar_path || '';
+  const avatarUrl = avatarPath && !avatarPath.startsWith('preset:') ? supabase.storage.from('avatars').getPublicUrl(avatarPath).data.publicUrl : '';
+  const avatarPresentation = getAvatarPresentation(avatarPath, avatarUrl);
 
   return <>
     <div className="account-menu">
       {isAdmin && <button className="admin-trigger" onClick={() => { setOpen(false); onAdmin(); }}>ADMIN</button>}
       <button className="account-trigger" onClick={() => setOpen(current => !current)} aria-expanded={open} aria-haspopup="menu">
-        <span className="account-avatar">{avatarUrl ? <img src={avatarUrl} alt="" /> : initial}</span><span>{profile?.display_name || profile?.username || user.email}</span><span className="account-chevron">⌄</span>
+        <span className="account-avatar">{avatarPresentation.type === 'preset' ? avatarPresentation.mark : avatarPresentation.type === 'image' ? <img src={avatarPresentation.url} alt="" /> : initial}</span><span>{profile?.display_name || profile?.username || user.email}</span><span className="account-chevron">⌄</span>
       </button>
       {open && <div className="account-dropdown" role="menu">
         <div className="dropdown-identity"><span className="section-kicker">SIGNED IN AS</span><strong>{user.email}</strong></div>

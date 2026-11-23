@@ -8,6 +8,7 @@ import { searchSeries, getSeries } from "./services/cinemeta.js";
 import { getSeasonSources } from "./services/torrentio.js";
 import { explainSourceCandidates, geminiStatus, suggestSearchQueries } from "./services/gemini.js";
 import { requireUser, supabaseRequest, supabaseRpc } from "./services/supabaseAuth.js";
+import { normalizeRankingPreference } from "../shared/rankingPreferences.js";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config();
@@ -171,9 +172,7 @@ app.get("/api/torrentio/season/:seriesId/:season", async (req, res) => {
     ? parseEpisodeNumbers(explicitEpisodes)
     : parseEpisodeNumbers(explicitEpisodes, { numericMeansCount: true });
   const audioMode = ["any", "english-dubbed-only", "english-dubbed-or-dual"].includes(req.query.audio) ? req.query.audio : "any";
-  const preference = ["default", "smallest", "seeders", "1337x", "balanced", "quality", "best-overall", "smallest-acceptable", "most-reliable"].includes(req.query.preference)
-    ? req.query.preference
-    : "default";
+  const preference = normalizeRankingPreference(req.query.preference);
   const resolution = ["any", "480p", "576p", "720p", "1080p", "1440p", "2160p"].includes(req.query.resolution) ? req.query.resolution : "1080p";
   const maxSizeGb = req.query.maxSizeGb === undefined || req.query.maxSizeGb === "" ? null : Number(req.query.maxSizeGb);
   const minSeeders = req.query.minSeeders === undefined || req.query.minSeeders === "" ? null : Number(req.query.minSeeders);

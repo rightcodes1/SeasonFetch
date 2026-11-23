@@ -20,13 +20,14 @@ export function scoreRelease(release, profileName = "best-overall", context = {}
     quality: qualityScore(release),
     size: sizeScore(release, context.maxSizeBytes),
     seeders: seederScore(release, context.maxSeeders),
-    completeness: Math.min(1, (release.source?.metadataCompleteness || 0) / 7)
+    completeness: Math.min(1, (release.source?.metadataCompleteness || 0) / 7),
+    provider: release.preferredProvider || release.provider === "1337x" ? 1 : 0
   };
   const score = Object.entries(profile).reduce((total, [key, weight]) => total + scores[key] * weight, 0);
   return {
     ...release,
     score,
     scoreBreakdown: scores,
-    explanation: `quality ${(scores.quality * 100).toFixed(0)}%, size ${(scores.size * 100).toFixed(0)}%, seeders ${(scores.seeders * 100).toFixed(0)}%, metadata ${(scores.completeness * 100).toFixed(0)}%`
+    explanation: `quality ${(scores.quality * 100).toFixed(0)}%, size ${(scores.size * 100).toFixed(0)}%, seeders ${(scores.seeders * 100).toFixed(0)}%, metadata ${(scores.completeness * 100).toFixed(0)}%, 1337x provider ${(scores.provider * 100).toFixed(0)}%`
   };
 }
