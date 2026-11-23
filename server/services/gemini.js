@@ -17,12 +17,14 @@ function parseJson(text) {
   return JSON.parse(cleaned);
 }
 
-function sanitizeCandidates(candidates) {
+export function sanitizeCandidates(candidates) {
   return candidates.slice(0, 20).map((candidate, index) => ({
     index,
     title: String(candidate?.title || "").slice(0, 240),
     provider: String(candidate?.provider || "").slice(0, 80),
-    resolution: String(candidate?.resolution || "").slice(0, 40),
+    resolution: typeof candidate?.resolution === "string" && candidate.resolution.trim()
+      ? candidate.resolution.trim().slice(0, 40)
+      : null,
     sizeBytes: Number.isFinite(candidate?.sizeBytes) ? candidate.sizeBytes : null,
     seeders: Number.isFinite(candidate?.seeders) ? candidate.seeders : null,
     trackerCount: Number.isFinite(candidate?.trackerCount) ? candidate.trackerCount : 0,
@@ -78,6 +80,7 @@ export async function explainSourceCandidates({ seriesTitle = "", season, episod
   const prompt = [
     "You are a torrent-source metadata assistant.",
     "Choose only among the supplied candidate indexes. Never invent a candidate, hash, tracker, URL, seeder count, size, or file index.",
+    "A null resolution means unknown: do not infer a resolution or treat missing resolution as evidence for or against a candidate.",
     "The application currently ranks sources deterministically; use the model to explain the same policy and flag ambiguity. Do not treat this as permission to invent or replace source metadata.",
     "Core rule: always prioritize the smallest known download size. Then prefer the most known seeders among equal or comparably sized choices. If size and seeders conflict, make a practical tradeoff: do not choose a much larger file merely because it has more seeders. Use 1337x only as a tie-breaker or quality signal after size and seeder considerations, never as an automatic override.",
     "Return JSON only with this schema:",

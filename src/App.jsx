@@ -10,7 +10,9 @@ import { getEpisodeReleaseFields, getReleaseIdentity, restoreEpisodeRecommendati
 import { copyTextToClipboard } from './utils/clipboard.js';
 import { signOutFromAuth } from './utils/accountActions.js';
 import { createScanCoordinator } from './utils/scanCoordinator.js';
-import { normalizeRankingPreference, RANKING_PREFERENCES } from '../shared/rankingPreferences.js';
+import { createSearchCoordinator } from './utils/searchCoordinator.js';
+import { toGeminiCandidate } from './utils/geminiCandidates.js';
+import { normalizeRankingPreference, rankingPreferenceDescription, RANKING_PREFERENCES } from '../shared/rankingPreferences.js';
 
 const SERIES = [
   {
@@ -231,10 +233,11 @@ function App() {
   const [authMode, setAuthMode] = useState(recoveryLinkDetected ? 'reset' : 'sign-in');
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
-  const searchRequestRef = useRef(0);
   const suggestionRequestRef = useRef(0);
   const suggestionTimerRef = useRef(null);
   const metadataRequestRef = useRef(0);
+  const searchCoordinatorRef = useRef(null);
+  if (!searchCoordinatorRef.current) searchCoordinatorRef.current = createSearchCoordinator();
   const scanCoordinatorRef = useRef(null);
   if (!scanCoordinatorRef.current) scanCoordinatorRef.current = createScanCoordinator({ onCheckingChange: setChecking });
   const [torrentioPreference, setTorrentioPreference] = useState(() => {
@@ -264,6 +267,20 @@ function App() {
 
   function invalidateScan() {
     scanCoordinatorRef.current.invalidate();
+  }
+
+  function invalidateSearch() {
+    searchCoordinatorRef.current.invalidate();
+    setSearching(false);
+  }
+
+  function invalidateSuggestions() {
+    suggestionRequestRef.current += 1;
+    if (suggestionTimerRef.current !== null) {
+      window.clearTimeout(suggestionTimerRef.current);
+      suggestionTimerRef.current = null;
+    }
+    setSuggestionsLoading(false);
   }
 
   function scanContextMatches(expected) {
@@ -406,14 +423,9 @@ function App() {
   function runSearch(event, overrideQuery) {
     event?.preventDefault();
     invalidateScan();
-    suggestionRequestRef.current += 1;
-    if (suggestionTimerRef.current !== null) {
-      window.clearTimeout(suggestionTimerRef.current);
-      suggestionTimerRef.current = null;
-    }
-    setSuggestionsLoading(false);
+    invalidateSearch();
+    invalidateSuggestions();
     const cleanQuery = String(overrideQuery ?? query).trim().toLowerCase();
-    const requestId = ++searchRequestRef.current;
     setSearchTouched(true);
     setSearching(true);
     setNotice(null);
@@ -421,9 +433,9 @@ function App() {
     setSelected(null);
     setEpisodes([]);
     setExpanded({});
-    window.setTimeout(async () => {
+    searchCoordinatorRef.current.schedule(async requestId => {
       if (cleanQuery.length < 2) {
-        if (requestId !== searchRequestRef.current) return;
+        if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
         setResults([]);
         setSearching(false);
         setNotice('Enter at least two characters to search.');
@@ -432,26 +444,27 @@ function App() {
 
       try {
         const data = await cinemeta.search(cleanQuery);
-        if (requestId !== searchRequestRef.current) return;
+        if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
         let nextResults = decorateResults(data.results || []);
         let correctedQuery = '';
         if (!nextResults.length) {
           try {
             const assisted = await searchWithGeminiAssist(cleanQuery);
-            if (requestId !== searchRequestRef.current) return;
+            if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
             nextResults = assisted.results;
             correctedQuery = assisted.correctedQuery;
           } catch (assistError) {
             console.warn('Gemini search assist failed:', assistError);
           }
         }
+        if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
         setResults(nextResults);
         setSearchSuggestions(nextResults.slice(0, 5));
         setSearching(false);
         if (correctedQuery) setNotice(`Gemini search assist matched “${correctedQuery}”.`);
         else if (!nextResults.length) setNotice('No series found. Try another title.');
       } catch (error) {
-        if (requestId !== searchRequestRef.current) return;
+        if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
         console.warn('Cinemeta search failed; using local preview matches.', error);
         const fallback = SERIES.filter(item => `${item.title} ${item.type}`.toLowerCase().includes(cleanQuery));
         setResults(fallback);
@@ -462,6 +475,8 @@ function App() {
   }
 
   async function chooseSeries(series) {
+    invalidateSearch();
+    invalidateSuggestions();
     invalidateScan();
     const requestId = ++metadataRequestRef.current;
     const local = SERIES.find(item => item.imdbId === series.imdbId || item.id === series.id);
@@ -741,16 +756,7 @@ function App() {
     if (!item?.id || item.preview) return;
     setGeminiLoading(current => ({ ...current, [item.id]: true }));
     setGeminiAnalysis(current => ({ ...current, [item.id]: null }));
-    const candidates = (item.candidates?.length ? item.candidates : [item]).map(candidate => ({
-      title: candidate.title || candidate.format || '',
-      provider: candidate.provider || '',
-      resolution: candidate.resolution || '1080p',
-      sizeBytes: candidate.sizeBytes ?? null,
-      seeders: candidate.seeders ?? null,
-      trackerCount: candidate.trackerCount || 0,
-      fileIdx: candidate.fileIdx ?? null,
-      preferredProvider: Boolean(candidate.preferredProvider)
-    }));
+    const candidates = (item.candidates?.length ? item.candidates : [item]).map(toGeminiCandidate);
 
     try {
       const response = await fetch('/api/gemini/explain-source', {
@@ -769,7 +775,10 @@ function App() {
   }
 
   function reset() {
+    invalidateSearch();
+    invalidateSuggestions();
     invalidateScan();
+    metadataRequestRef.current += 1;
     setQuery('');
     setResults([]);
     setSelected(null);
@@ -803,11 +812,11 @@ function App() {
         <section className="hero">
           <div className="eyebrow"><span className="eyebrow-dot" /> SEASON SOURCE FINDER</div>
           <h1>Find your season.<br /><span>One episode at a time.</span></h1>
-          <p className="hero-copy">Discover clean, high-quality sources for every episode.<br className="desktop-only" /> Automatically prioritize the smallest known file size.</p>
+          <p className="hero-copy">Discover clean, high-quality sources for every episode.<br className="desktop-only" /> {rankingPreferenceDescription(torrentioPreference)}</p>
           <form className="search-form" onSubmit={runSearch}>
             <Icon name="search" size={18} />
-            <input value={query} onChange={event => { setQuery(event.target.value); setSearchTouched(false); }} placeholder="Search a TV series..." aria-label="Search a TV series" />
-            {query && <button className="clear-search" type="button" onClick={() => setQuery('')} aria-label="Clear search"><Icon name="x" size={15} /></button>}
+            <input value={query} onChange={event => { invalidateSearch(); setQuery(event.target.value); setSearchTouched(false); }} placeholder="Search a TV series..." aria-label="Search a TV series" />
+            {query && <button className="clear-search" type="button" onClick={() => { invalidateSearch(); setQuery(''); }} aria-label="Clear search"><Icon name="x" size={15} /></button>}
             <button className="search-button" disabled={searching} type="submit">
               {searching ? <span className="spinner" /> : <>Search <Icon name="arrow" size={15} /></>}
             </button>
@@ -887,7 +896,7 @@ function App() {
               </div>
               {seasonIntegrity && <div className="integrity-panel">
                 <div><span className="section-kicker">SEASON INTEGRITY</span><strong>{seasonIntegrity.usableEpisodes} / {episodes.length} usable episodes</strong></div>
-                <div className="integrity-grid"><span><b>Missing</b>{seasonIntegrity.missingEpisodes?.length ? seasonIntegrity.missingEpisodes.map(number => `E${String(number).padStart(2, '0')}`).join(', ') : 'None'}</span><span><b>Resolution</b>{seasonIntegrity.resolutionConsistency || 'Unknown'}</span><span><b>Audio evidence</b>{seasonIntegrity.audioConsistency === 'explicit-english-dub' ? 'Explicit English Dub' : seasonIntegrity.audioConsistency === 'possible-english-audio' ? 'Possible English Audio' : seasonIntegrity.audioConsistency === 'mixed' ? 'Mixed' : 'Unverified'}</span><span><b>Release groups</b>{seasonIntegrity.releaseGroups?.length ? seasonIntegrity.releaseGroups.join(', ') : 'Unknown'}</span><span><b>Estimated size</b>{seasonIntegrity.estimatedTotalSizeBytes ? `${(seasonIntegrity.estimatedTotalSizeBytes / 1024 ** 3).toFixed(2)} GB` : 'Unknown'}</span><span><b>Weak releases</b>{seasonIntegrity.weakEpisodes?.length ? seasonIntegrity.weakEpisodes.map(number => `E${String(number).padStart(2, '0')}`).join(', ') : 'None detected'}</span></div>
+                <div className="integrity-grid"><span><b>Missing</b>{seasonIntegrity.missingEpisodes?.length ? seasonIntegrity.missingEpisodes.map(number => `E${String(number).padStart(2, '0')}`).join(', ') : 'None'}</span><span><b>Resolution</b>{seasonIntegrity.resolutionConsistency || 'Unknown'}</span><span><b>Audio evidence</b>{seasonIntegrity.audioConsistency === 'explicit-english-dub' ? 'Explicit English Dub' : seasonIntegrity.audioConsistency === 'possible-english-audio' ? 'Possible English Audio' : seasonIntegrity.audioConsistency === 'mixed' ? 'Mixed' : 'Unverified'}</span><span><b>Release groups</b>{seasonIntegrity.releaseGroups?.length ? seasonIntegrity.releaseGroups.join(', ') : 'Unknown'}</span><span><b>Selected-release size estimate</b>{seasonIntegrity.estimatedTotalSizeBytes ? `${(seasonIntegrity.estimatedTotalSizeBytes / 1024 ** 3).toFixed(2)} GB · ${seasonIntegrity.estimatedSizeComplete ? 'all ' : 'partial · '}${seasonIntegrity.estimatedSizeKnownEpisodes}/${episodes.length} sizes known` : `Unknown · ${seasonIntegrity.estimatedSizeKnownEpisodes || 0}/${episodes.length} sizes known`}</span><span><b>Weak releases</b>{seasonIntegrity.weakEpisodes?.length ? seasonIntegrity.weakEpisodes.map(number => `E${String(number).padStart(2, '0')}`).join(', ') : 'None detected'}</span></div>
               </div>}
               <div className="episode-table">
                 <div className="table-header"><span>EPISODE</span><span>SOURCE</span><span>FILE SIZE</span><span>STATUS</span><span /></div>

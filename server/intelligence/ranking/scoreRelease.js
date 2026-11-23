@@ -1,7 +1,9 @@
 import { RECOMMENDATION_PROFILES } from "./recommendationProfiles.js";
 
 function qualityScore(release) {
-  return ({ "2160p": 1, "1440p": 0.85, "1080p": 0.7, "720p": 0.45, "576p": 0.25, "480p": 0.15 }[release.resolution] || 0) + (release.hdr ? 0.1 : 0) + (["HEVC", "AV1"].includes(release.codec) ? 0.08 : 0);
+  const knownResolutionScore = { "2160p": 1, "1440p": 0.85, "1080p": 0.7, "720p": 0.45, "576p": 0.25, "480p": 0.15 }[release.resolution];
+  const neutralUnknownResolutionScore = 0.575;
+  return (knownResolutionScore ?? neutralUnknownResolutionScore) + (release.hdr ? 0.1 : 0) + (["HEVC", "AV1"].includes(release.codec) ? 0.08 : 0);
 }
 
 function sizeScore(release, maxSize) {
