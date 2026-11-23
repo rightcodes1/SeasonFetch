@@ -110,11 +110,13 @@ h1 span { color: #b28dfc; }
 .genre-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .genre-row span { padding: 4px 7px; border: 1px solid #ffffff13; border-radius: 5px; color: #898590; background: #ffffff04; font-size: 9px; }
 .change-button { align-self: flex-start; display: inline-flex; align-items: center; gap: 7px; border: 0; color: #b89aff; background: transparent; font-size: 11px; white-space: nowrap; }
-.season-toolbar { margin: 39px 0 19px; }
-.season-controls { display: flex; align-items: center; gap: 9px; }
-.select-wrap { position: relative; display: flex; align-items: center; gap: 7px; height: 40px; padding: 0 11px; border: 1px solid #ffffff1c; border-radius: 9px; color: #928c9b; background: #18191f; }
-.select-wrap select { appearance: none; min-width: 88px; padding: 0 18px 0 1px; border: 0; outline: 0; color: #e8e5ed; background: transparent; font-size: 11px; }
-.preference-wrap select { min-width: 145px; }
+.season-toolbar { align-items: flex-start; margin: 39px 0 19px; }
+.season-controls { min-width: 0; flex: 1; display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+.season-filter-controls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.season-action-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.select-wrap { position: relative; min-width: 0; display: flex; align-items: center; gap: 7px; height: 40px; padding: 0 11px; border: 1px solid #ffffff1c; border-radius: 9px; color: #928c9b; background: #18191f; }
+.select-wrap select { appearance: none; width: 100%; min-width: 0; flex: 1; overflow: hidden; padding: 0 18px 0 1px; border: 0; outline: 0; color: #e8e5ed; background: transparent; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.preference-wrap select { min-width: 0; }
 .select-wrap > svg:last-child { position: absolute; right: 8px; pointer-events: none; }
 .primary-button { min-height: 40px; padding: 10px 13px; font-size: 11px; }
 .scan-panel { position: relative; display: flex; align-items: center; gap: 12px; min-height: 74px; margin-bottom: 15px; overflow: hidden; padding: 15px 18px; border: 1px solid #a98af52b; border-radius: 11px; color: #d4cbeb; background: #211d2d; }
@@ -238,6 +240,11 @@ h1 span { color: #b28dfc; }
 .toast { position: fixed; z-index: 5; right: 24px; bottom: 24px; display: flex; align-items: center; gap: 9px; padding: 11px 14px 11px 10px; border: 1px solid #ffffff1c; border-radius: 9px; color: #e8e1f0; background: #24212c; box-shadow: 0 15px 40px #00000055; font-size: 11px; animation: toast-in .25s ease both; }
 .toast-icon { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 6px; color: #8bd4a7; background: #7bd29b1f; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 980px) {
+  .season-toolbar { flex-direction: column; gap: 13px; }
+  .season-controls { width: 100%; flex: none; }
+  .season-action-controls { justify-content: flex-start; }
+}
 @media (max-width: 760px) {
   .app-shell { width: min(100% - 26px, 640px); }
   .topbar { height: 68px; }
@@ -259,11 +266,12 @@ h1 span { color: #b28dfc; }
   .change-button { margin: 3px 0 0 auto; }
   .season-toolbar { align-items: flex-start; flex-direction: column; gap: 13px; }
   .season-controls { width: 100%; }
-  .select-wrap { flex: 1; }
+  .season-filter-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .select-wrap select { width: 100%; }
-  .preference-wrap { flex-basis: 100%; }
-  .preference-wrap select { min-width: 0; }
-  .primary-button { flex: 1; }
+  .season-action-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .season-action-controls > button { width: 100%; min-width: 0; }
+  .season-action-controls > .secondary-button { gap: 6px; padding: 10px 9px; font-size: 10px; }
+  .season-action-controls > .primary-button { flex: initial; }
   .summary-panel { gap: 15px; flex-wrap: wrap; }
   .summary-progress { min-width: 100%; order: 3; }
   .summary-chip { margin-left: auto; }

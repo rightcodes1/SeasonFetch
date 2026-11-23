@@ -49,7 +49,7 @@ with sync_playwright() as p:
         if (window.__denyCopy) throw new Error('Permission denied'); window.__copied = text;
       }}});
       document.execCommand = () => false;""")
-    page.goto('http://127.0.0.1:3000/', wait_until='networkidle')
+    page.goto(os.environ.get('APP_URL', 'http://127.0.0.1:3000/'), wait_until='networkidle')
     page.get_by_role('button', name='Search', exact=True).click()
     page.get_by_role('button', name='Mock Series').first.click()
     page.get_by_role('button', name='Check sources', exact=True).click()
@@ -102,7 +102,13 @@ with sync_playwright() as p:
     assert '0 unique downloads' in page.locator('.download-tray').inner_text().lower()
     assert page.locator('.download-tray').get_by_role('button',name='Copy magnets').is_disabled()
     assert not errors, errors
-    page.set_viewport_size({'width':375,'height':812})
-    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), 'horizontal overflow at 375px'
-    print('PASS: mocked search, numeric ordering, shared download removal, manual override/restore, individual magnet and Stremio links/copy, TXT export, clipboard success/failure, cross-season tray, empty and mobile')
+    for width in (1280, 1024, 900, 768, 375, 320):
+        page.set_viewport_size({'width':width,'height':812})
+        page.evaluate("document.activeElement?.blur(); window.scrollTo(0,0); document.querySelector('.app-shell').scrollLeft = 0")
+        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), f'horizontal overflow at {width}px'
+        bounds = page.evaluate("""[...document.querySelectorAll('.season-filter-controls select, .season-action-controls button')]
+          .map(el => { const r = el.getBoundingClientRect(), p = el.parentElement.getBoundingClientRect(), g = el.parentElement.parentElement.getBoundingClientRect(); return {label: el.innerText || el.getAttribute('aria-label') || el.tagName, left: r.left, right: r.right, width: r.width, parent: [p.left, p.right], group: [g.left, g.right]}; })""")
+        layout = page.evaluate("""({innerWidth, docWidth: document.documentElement.scrollWidth, shellScroll:[document.querySelector('.app-shell').scrollLeft,document.querySelector('.app-shell').scrollWidth,document.querySelector('.app-shell').clientWidth], ancestors: (() => { let e = document.querySelector('.season-toolbar'), out = []; while (e) { const r = e.getBoundingClientRect(), s = getComputedStyle(e); out.push({tag:e.tagName, class:e.className, bounds:[r.left,r.right], transform:s.transform, display:s.display, width:s.width}); if (e.classList.contains('app-shell')) break; e = e.parentElement; } return out; })()})""")
+        assert all(item['left'] >= -1 and item['right'] <= width + 1 and item['width'] > 0 for item in bounds), f'season toolbar controls clipped at {width}px: {layout}, {bounds}'
+    print('PASS: mocked search, numeric ordering, shared download removal, manual override/restore, individual magnet and Stremio links/copy, TXT export, clipboard success/failure, cross-season tray, empty state, and toolbar/mobile layout at 320–1280px')
     browser.close()
