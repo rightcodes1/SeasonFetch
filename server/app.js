@@ -4,8 +4,8 @@ import express from "express";
 import helmet from "helmet";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { searchSeries, getSeries } from "./services/cinemeta.js";
-import { getSeasonSources } from "./services/torrentio.js";
+import { searchCinemeta, getSeries, getMovie } from "./services/cinemeta.js";
+import { getSeasonSources, getMovieSources } from "./services/torrentio.js";
 import { explainSourceCandidates, geminiStatus, suggestSearchQueries } from "./services/gemini.js";
 import { requireUser, supabaseRequest, supabaseRpc } from "./services/supabaseAuth.js";
 import { normalizeRankingPreference } from "../shared/rankingPreferences.js";
@@ -131,11 +131,25 @@ app.post("/api/gemini/explain-source", rateLimitGemini, async (req, res) => {
 });
 
 app.get("/api/cinemeta/search", async (req, res) => {
+  const mediaType = req.query.type === undefined ? "series" : req.query.type;
+  if (!["movie", "series"].includes(mediaType)) {
+    return res.status(400).json({ error: "Media type must be movie or series." });
+  }
   try {
-    return res.json({ results: await searchSeries(req.query.q) });
+    return res.json({ results: await searchCinemeta(req.query.q, mediaType) });
   } catch (error) {
     console.error("Cinemeta search failed:", error.message);
     return res.status(502).json({ error: "Cinemeta search is unavailable right now." });
+  }
+});
+
+app.get("/api/cinemeta/movie/:id", async (req, res) => {
+  if (!/^tt\d+$/.test(req.params.id)) return res.status(400).json({ error: "Invalid movie IMDb ID." });
+  try {
+    return res.json(await getMovie(req.params.id));
+  } catch (error) {
+    console.error("Cinemeta movie metadata failed:", error.message);
+    return res.status(error.statusCode || 502).json({ error: error.statusCode === 404 ? "Movie not found." : error.statusCode === 400 ? "Invalid movie IMDb ID." : "Cinemeta metadata is temporarily unavailable." });
   }
 });
 
@@ -200,6 +214,31 @@ app.get("/api/torrentio/season/:seriesId/:season", async (req, res) => {
     return res.json({ provider: "torrentio", seriesId, season, audioMode, preference, filters, totalEpisodes: scan.results.length, ...scan });
   } catch (error) {
     console.error("Torrentio season lookup failed:", error.message);
+    return res.status(502).json({ error: "Torrentio is unavailable right now." });
+  }
+});
+
+app.get("/api/torrentio/movie/:movieId", async (req, res) => {
+  const { movieId } = req.params;
+  if (!/^tt\d+$/.test(movieId)) return res.status(400).json({ error: "Invalid movie IMDb ID." });
+
+  const audioMode = ["any", "english-dubbed-only", "english-dubbed-or-dual"].includes(req.query.audio) ? req.query.audio : "any";
+  const preference = normalizeRankingPreference(req.query.preference);
+  const resolution = ["any", "480p", "576p", "720p", "1080p", "1440p", "2160p"].includes(req.query.resolution) ? req.query.resolution : "1080p";
+  const maxSizeGb = req.query.maxSizeGb === undefined || req.query.maxSizeGb === "" ? null : Number(req.query.maxSizeGb);
+  const minSeeders = req.query.minSeeders === undefined || req.query.minSeeders === "" ? null : Number(req.query.minSeeders);
+  const codec = ["H.264", "HEVC", "AV1"].includes(req.query.codec) ? req.query.codec : null;
+  const hdr = ["HDR", "Dolby Vision"].includes(req.query.hdr) ? req.query.hdr : null;
+  if ((maxSizeGb !== null && (!Number.isFinite(maxSizeGb) || maxSizeGb <= 0)) || (minSeeders !== null && (!Number.isInteger(minSeeders) || minSeeders < 0))) {
+    return res.status(400).json({ error: "Invalid size or seeder filter." });
+  }
+  const filters = { resolution, maxSizeBytes: maxSizeGb === null ? null : maxSizeGb * 1024 ** 3, minSeeders, codec, hdr };
+
+  try {
+    const result = await getMovieSources(movieId, preference, audioMode, filters);
+    return res.json({ provider: "torrentio", mediaType: "movie", movieId, preference, audioMode, filters, ...result });
+  } catch (error) {
+    console.error("Torrentio movie lookup failed:", error.message);
     return res.status(502).json({ error: "Torrentio is unavailable right now." });
   }
 });

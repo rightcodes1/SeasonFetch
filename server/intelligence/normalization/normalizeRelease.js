@@ -7,8 +7,10 @@ export function normalizeRelease(raw = {}, context = {}) {
     id: `${source.infoHash}:${source.fileIdx ?? "all"}`,
     title: source.title,
     infoHash: source.infoHash,
-    season: context.season ?? null,
-    episode: context.episode ?? null,
+    ...(context.mediaType === "movie" ? {} : {
+      season: context.season ?? null,
+      episode: context.episode ?? null
+    }),
     resolution: source.resolution,
     codec: source.codec,
     hdr: source.hdr,

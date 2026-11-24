@@ -12,5 +12,10 @@ export const torrentio = {
     const params = new URLSearchParams({ episodeList: episodes, preference, audio: audioMode });
     Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== null && value !== "") params.set(key, String(value)); });
     return request(`/api/torrentio/season/${encodeURIComponent(seriesId)}/${season}?${params.toString()}`, options);
+  },
+  getMovieSources(movieId, preference = 'smallest-acceptable', audioMode = 'any', filters = {}, options = {}) {
+    const params = new URLSearchParams({ preference, audio: audioMode });
+    Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== null && value !== '') params.set(key, String(value)); });
+    return request(`/api/torrentio/movie/${encodeURIComponent(movieId)}?${params.toString()}`, options);
   }
 };

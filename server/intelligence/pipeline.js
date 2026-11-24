@@ -20,8 +20,8 @@ export function recommendationProfileForPreference(preference = "default") {
   return normalizeRankingPreference(preference);
 }
 
-export function processReleases(rawResults = [], { season = null, episode = null, profile = "best-overall", filters = {}, audioMode = "any" } = {}) {
-  const normalized = rawResults.map(raw => normalizeRelease(raw, { season, episode })).filter(Boolean);
+export function processReleases(rawResults = [], { season = null, episode = null, mediaType = null, profile = "best-overall", filters = {}, audioMode = "any" } = {}) {
+  const normalized = rawResults.map(raw => normalizeRelease(raw, { season, episode, mediaType })).filter(Boolean);
   const validated = normalized.map(validateRelease).filter(release => release.validation.status !== "invalid");
   const eligible = validated.filter(release => matchesHardFilters(release, { ...filters, audioMode }));
   const duplicateGroups = identifyDuplicates(eligible);

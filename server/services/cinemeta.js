@@ -21,7 +21,7 @@ async function requestJson(url) {
   return response.json();
 }
 
-function normalizeSeries(item = {}) {
+function normalizeMetadata(item = {}, mediaType = "series") {
   const genres = Array.isArray(item.genres) ? item.genres : [];
 
   return {
@@ -30,33 +30,58 @@ function normalizeSeries(item = {}) {
     title: item.name || "Unknown title",
     year: item.year || null,
     rating: item.imdbRating || item.rating || null,
-    type: genres.slice(0, 2).join(" · ") || "Series",
+    // `type` has historically been the genre/display label in this API.
+    type: genres.slice(0, 2).join(" · ") || (mediaType === "movie" ? "Movie" : "Series"),
     synopsis: item.description || "",
     genres,
-    poster: item.poster || null
+    poster: item.poster || null,
+    mediaType
   };
 }
 
-async function hydrateSearchResult(series) {
+function normalizeSeries(item = {}) {
+  return normalizeMetadata(item, "series");
+}
+
+function normalizeMovie(item = {}) {
+  return normalizeMetadata(item, "movie");
+}
+
+async function hydrateSearchResult(item, mediaType) {
   try {
-    const data = await requestJson(`${BASE_URL}/meta/series/${encodeURIComponent(series.imdbId)}.json`);
-    return data.meta ? { ...series, ...normalizeSeries(data.meta) } : series;
+    const data = await requestJson(`${BASE_URL}/meta/${mediaType}/${encodeURIComponent(item.imdbId)}.json`);
+    const normalize = mediaType === "movie" ? normalizeMovie : normalizeSeries;
+    return data.meta ? { ...item, ...normalize(data.meta) } : item;
   } catch {
-    return series;
+    return item;
   }
 }
 
-export async function searchSeries(query) {
+async function searchByType(query, mediaType) {
   const cleanQuery = String(query || "").trim();
   if (cleanQuery.length < 2) return [];
 
-  const url = `${BASE_URL}/catalog/series/top/search=${encodeURIComponent(cleanQuery)}.json`;
+  const url = `${BASE_URL}/catalog/${mediaType}/top/search=${encodeURIComponent(cleanQuery)}.json`;
   const data = await requestJson(url);
+  const normalize = mediaType === "movie" ? normalizeMovie : normalizeSeries;
   const results = (data.metas || [])
-    .filter(item => item.type === "series" && /^tt\d+$/.test(item.id))
-    .map(normalizeSeries);
-  const hydrated = await Promise.all(results.slice(0, 8).map(hydrateSearchResult));
+    .filter(item => item.type === mediaType && /^tt\d+$/.test(item.id))
+    .map(normalize);
+  const hydrated = await Promise.all(results.slice(0, 8).map(item => hydrateSearchResult(item, mediaType)));
   return [...hydrated, ...results.slice(8)];
+}
+
+export async function searchSeries(query) {
+  return searchByType(query, "series");
+}
+
+export async function searchMovies(query) {
+  return searchByType(query, "movie");
+}
+
+export async function searchCinemeta(query, mediaType = "series") {
+  if (!new Set(["movie", "series"]).has(mediaType)) throw new Error("Invalid Cinemeta media type");
+  return searchByType(query, mediaType);
 }
 
 function normalizeEpisodes(meta = {}) {
@@ -81,8 +106,12 @@ function normalizeEpisodes(meta = {}) {
   return episodes;
 }
 
+function isValidImdbId(id) {
+  return typeof id === "string" && /^tt\d+$/.test(id);
+}
+
 export async function getSeries(id) {
-  if (!/^tt\d+$/.test(id)) throw new Error("Invalid series IMDb ID");
+  if (!isValidImdbId(id)) throw new Error("Invalid series IMDb ID");
   const data = await requestJson(`${BASE_URL}/meta/series/${encodeURIComponent(id)}.json`);
   if (!data.meta) {
     const error = new Error("Series not found");
@@ -94,4 +123,19 @@ export async function getSeries(id) {
     series: normalizeSeries(data.meta),
     episodes: normalizeEpisodes(data.meta)
   };
+}
+
+export async function getMovie(id) {
+  if (!isValidImdbId(id)) {
+    const error = new Error("Invalid movie IMDb ID");
+    error.statusCode = 400;
+    throw error;
+  }
+  const data = await requestJson(`${BASE_URL}/meta/movie/${encodeURIComponent(id)}.json`);
+  if (!data.meta) {
+    const error = new Error("Movie not found");
+    error.statusCode = 404;
+    throw error;
+  }
+  return { movie: normalizeMovie(data.meta) };
 }
