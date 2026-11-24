@@ -1,4 +1,4 @@
-import dotenv from "dotenv";
+import "./loadEnv.js";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
@@ -9,9 +9,6 @@ import { getSeasonSources, getMovieSources } from "./services/torrentio.js";
 import { explainSourceCandidates, geminiStatus, suggestSearchQueries } from "./services/gemini.js";
 import { requireUser, supabaseRequest, supabaseRpc } from "./services/supabaseAuth.js";
 import { normalizeRankingPreference } from "../shared/rankingPreferences.js";
-
-dotenv.config({ path: ".env.local" });
-dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -41,7 +38,10 @@ app.use(helmet({ frameguard: false }));
 app.use(cors({
   origin(origin, callback) {
     if (!origin || allowedOrigins.has(origin) || isSeasonFetchVercelOrigin(origin)) return callback(null, true);
-    return callback(new Error("Origin is not allowed by SeasonFetch."));
+    const error = new Error("Origin is not allowed by SeasonFetch.");
+    error.statusCode = 403;
+    error.code = "CORS_ORIGIN_NOT_ALLOWED";
+    return callback(error);
   }
 }));
 app.use(express.json({ limit: "1mb" }));
@@ -154,11 +154,12 @@ app.get("/api/cinemeta/movie/:id", async (req, res) => {
 });
 
 app.get("/api/cinemeta/series/:id", async (req, res) => {
+  if (!/^tt\d+$/.test(req.params.id)) return res.status(400).json({ error: "Invalid series IMDb ID." });
   try {
     return res.json(await getSeries(req.params.id));
   } catch (error) {
     console.error("Cinemeta metadata failed:", error.message);
-    return res.status(error.statusCode || 502).json({ error: error.statusCode === 404 ? "Series not found." : "Cinemeta metadata is temporarily unavailable." });
+    return res.status(error.statusCode || 502).json({ error: error.statusCode === 404 ? "Series not found." : error.statusCode === 400 ? "Invalid series IMDb ID." : "Cinemeta metadata is temporarily unavailable." });
   }
 });
 
@@ -254,8 +255,11 @@ app.use((req, res, next) => {
 });
 
 app.use((error, _req, res, _next) => {
+  if (error?.code === "CORS_ORIGIN_NOT_ALLOWED" && error?.statusCode === 403) {
+    return res.status(403).json({ error: error.message });
+  }
   console.error("Unhandled server error:", error);
-  res.status(500).json({ error: "Internal server error." });
+  return res.status(500).json({ error: "Internal server error." });
 });
 
 const isMainModule = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);

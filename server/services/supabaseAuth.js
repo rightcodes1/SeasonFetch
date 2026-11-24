@@ -1,8 +1,27 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
-const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-const jwks = supabaseUrl ? createRemoteJWKSet(new URL(`${supabaseUrl}/auth/v1/.well-known/jwks.json`)) : null;
+let cachedJwksUrl = '';
+let cachedJwks = null;
+
+function getSupabaseConfig() {
+  const rawUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  const supabaseUrl = String(rawUrl).trim().replace(/\/+$/, '');
+  const supabaseAnonKey = String(process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '').trim();
+  return { supabaseUrl, supabaseAnonKey };
+}
+
+function getJwks(supabaseUrl) {
+  if (!supabaseUrl) {
+    cachedJwksUrl = '';
+    cachedJwks = null;
+    return null;
+  }
+  if (cachedJwks && cachedJwksUrl === supabaseUrl) return cachedJwks;
+  const nextJwks = createRemoteJWKSet(new URL(`${supabaseUrl}/auth/v1/.well-known/jwks.json`));
+  cachedJwks = nextJwks;
+  cachedJwksUrl = supabaseUrl;
+  return cachedJwks;
+}
 
 export function getBearerToken(req) {
   const header = req.headers.authorization || '';
@@ -10,6 +29,8 @@ export function getBearerToken(req) {
 }
 
 export async function verifySupabaseToken(token) {
+  const { supabaseUrl } = getSupabaseConfig();
+  const jwks = getJwks(supabaseUrl);
   if (!jwks || !supabaseUrl || !token) throw new Error('Authentication is not configured.');
   const { payload } = await jwtVerify(token, jwks, {
     issuer: `${supabaseUrl}/auth/v1`,
@@ -20,6 +41,7 @@ export async function verifySupabaseToken(token) {
 }
 
 export async function supabaseRequest(path, token, options = {}) {
+  const { supabaseUrl, supabaseAnonKey } = getSupabaseConfig();
   if (!supabaseUrl || !supabaseAnonKey) throw new Error('Supabase server integration is not configured.');
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
     ...options,
@@ -42,6 +64,7 @@ export async function supabaseRequest(path, token, options = {}) {
 }
 
 export async function supabaseRpc(name, args, token) {
+  const { supabaseUrl, supabaseAnonKey } = getSupabaseConfig();
   if (!supabaseUrl || !supabaseAnonKey) throw new Error('Supabase server integration is not configured.');
   const response = await fetch(`${supabaseUrl}/rest/v1/rpc/${name}`, {
     method: 'POST',
