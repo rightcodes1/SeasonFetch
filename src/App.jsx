@@ -971,6 +971,7 @@ function App() {
           <span>Season<span className="accent-text">Fetch</span></span>
         </button>
           <div className="topbar-right">
+          <a className="manga-route-link" href="#/manga" aria-label="Open Manga library">Manga</a>
           <span className="live-indicator"><i /> Live discovery</span>
           <span className="topbar-label">{searchMode === 'movie' ? 'MOVIE SOURCE DISCOVERY' : 'TV SOURCE DISCOVERY'}</span>
           {user ? <AccountMenu supabase={supabase} user={user} profile={profile} isAdmin={isAdmin} onAdmin={() => setShowAdmin(true)} onSignOut={signOut} onProfileUpdated={setProfile} /> : <button className="account-trigger account-sign-in" onClick={() => { if (supabase) setShowAuth(true); else setNotice('Sign-in is unavailable because Supabase authentication is not configured for this deployment.'); }}>Sign in</button>}
