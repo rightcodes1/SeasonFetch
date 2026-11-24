@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { createMockMangaProvider } from './mockProvider.js';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createMockMangaProvider, mockCatalogSourceId } from './mockProvider.js';
+import { createMangaDexProvider, mangadexSourceId } from './mangadexProvider.js';
 import { sortChapters, sortPages } from './chapterOrdering.js';
 import { chapterStorageKey, createMangaStorage } from './storage.js';
-import { createMangaDownloadManager } from './downloadManager.js';
+import { createMangaProviderRouter, createRequestGuard } from './providerRouter.js';
 import { getReaderRetryTarget, restoreReadingPosition } from './readerProgress.js';
 import './manga.css';
 
@@ -29,26 +30,54 @@ function jobPercent(job) {
 }
 
 function Cover({ work, large = false }) {
-  const initials = work.title.split(/\s+/).slice(0, 3).map(word => word[0]).join('').toUpperCase();
+  const initials = (work.title || 'M').split(/\s+/).slice(0, 3).map(word => word[0]).join('').toUpperCase();
+  const label = work.sourceId === mockCatalogSourceId ? 'SEASONFETCH · SAMPLE' : String(work.sourceId || 'MANGA').toUpperCase();
   return (
-    <div className={`manga-cover${large ? ' manga-cover-large' : ''}`} style={{ '--cover-color': work.coverColor || '#51447e' }} aria-label={`${work.title} sample cover`}>
+    <div className={`manga-cover${large ? ' manga-cover-large' : ''}`} style={{ '--cover-color': work.coverColor || '#51447e' }} aria-label={`${work.title} cover`}>
+      {work.coverUrl && <img className="manga-cover-image" src={work.coverUrl} alt="" loading={large ? 'eager' : 'lazy'} onError={event => event.currentTarget.remove()} />}
       <span className="manga-cover-orbit" />
       <strong>{initials}</strong>
-      <small>SEASONFETCH · SAMPLE</small>
+      <small>{label}</small>
     </div>
   );
 }
 
+function buildOfflinePages(chapter, pageIndexes) {
+  return [...pageIndexes]
+    .sort((a, b) => a - b)
+    .map(index => ({
+      id: `${chapter.id}:page:${index}`,
+      sourceId: chapter.sourceId,
+      chapterId: chapter.id,
+      index,
+      label: `Page ${index + 1}`
+    }));
+}
+
 export default function MangaApp() {
-  const provider = useMemo(() => createMockMangaProvider({ failures: { 'chapter-orbit-10:page:1': 1 } }), []);
+  const [activeSourceId, setActiveSourceId] = useState(mangadexSourceId);
   const storage = useMemo(() => createMangaStorage(), []);
-  const manager = useMemo(() => createMangaDownloadManager(provider, storage), [provider, storage]);
+  const router = useMemo(() => createMangaProviderRouter({
+    [mangadexSourceId]: createMangaDexProvider(),
+    [mockCatalogSourceId]: createMockMangaProvider({ failures: { 'chapter-orbit-10:page:1': 1 } })
+  }, storage), [storage]);
+  const provider = router.getProvider(activeSourceId);
+  const isLiveSource = activeSourceId !== mockCatalogSourceId;
+  const searchGuardRef = useRef(null);
+  if (!searchGuardRef.current) searchGuardRef.current = createRequestGuard();
+  const detailsGuardRef = useRef(null);
+  if (!detailsGuardRef.current) detailsGuardRef.current = createRequestGuard();
+  const readerGuardRef = useRef(null);
+  if (!readerGuardRef.current) readerGuardRef.current = createRequestGuard();
   const [screen, setScreen] = useState('browse');
+  const [readerReturnScreen, setReaderReturnScreen] = useState('details');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
+  const [loadingDetails, setLoadingDetails] = useState(false);
   const [selectedWork, setSelectedWork] = useState(null);
   const [chapters, setChapters] = useState([]);
+  const [chapterFeedInfo, setChapterFeedInfo] = useState(null);
   const [selectedChapter, setSelectedChapter] = useState(null);
   const [pages, setPages] = useState([]);
   const [pageIndex, setPageIndex] = useState(0);
@@ -94,13 +123,12 @@ export default function MangaApp() {
 
   useEffect(() => {
     let active = true;
-    provider.search('').then(items => { if (active) setResults(items); });
     (async () => {
       try {
         await refreshStorage();
         if (!active) return;
         setStorageReady(true);
-        const resumed = await manager.resumeInterrupted({ onUpdate: applyJobUpdate });
+        const resumed = await router.resumeInterrupted({ onUpdate: applyJobUpdate });
         if (active && resumed.length) setNotice(`Resumed ${resumed.length} interrupted chapter download${resumed.length === 1 ? '' : 's'}.`);
         if (active) await refreshStorage();
       } catch (error) {
@@ -108,38 +136,87 @@ export default function MangaApp() {
       }
     })();
     return () => { active = false; };
-  }, [provider, manager, refreshStorage, applyJobUpdate]);
+  }, [router, refreshStorage, applyJobUpdate]);
+
+  useEffect(() => {
+    const requestId = searchGuardRef.current.next();
+    setSearching(true);
+    setNotice('');
+    provider.search('').then(items => {
+      if (searchGuardRef.current.isCurrent(requestId)) setResults(items);
+    }).catch(error => {
+      if (searchGuardRef.current.isCurrent(requestId)) {
+        setResults([]);
+        setNotice(error.message || 'Unable to load the manga catalog right now.');
+      }
+    }).finally(() => {
+      if (searchGuardRef.current.isCurrent(requestId)) setSearching(false);
+    });
+    return () => { searchGuardRef.current.invalidate(); };
+  }, [provider]);
+
+  function switchSource(nextSourceId) {
+    if (nextSourceId === activeSourceId) return;
+    searchGuardRef.current.invalidate();
+    detailsGuardRef.current.invalidate();
+    readerGuardRef.current.invalidate();
+    setActiveSourceId(nextSourceId);
+    setScreen('browse');
+    setQuery('');
+    setResults([]);
+    setSelectedWork(null);
+    setChapters([]);
+    setChapterFeedInfo(null);
+    setSelectedChapter(null);
+    setPages([]);
+    setNotice('');
+  }
 
   async function searchCatalog(event) {
     event?.preventDefault();
+    const requestId = searchGuardRef.current.next();
     setSearching(true);
     setNotice('');
     try {
-      setResults(await provider.search(query));
+      const items = await provider.search(query);
+      if (!searchGuardRef.current.isCurrent(requestId)) return;
+      setResults(items);
     } catch (error) {
-      setNotice(error.message || 'The sample catalog could not be searched.');
+      if (!searchGuardRef.current.isCurrent(requestId)) return;
+      setNotice(error.message || 'The manga catalog could not be searched.');
     } finally {
-      setSearching(false);
+      if (searchGuardRef.current.isCurrent(requestId)) setSearching(false);
     }
   }
 
   async function openWork(work) {
+    const requestId = detailsGuardRef.current.next();
     setScreen('details');
     setSelectedChapter(null);
     setChapters([]);
+    setChapterFeedInfo(null);
     setSelectedWork(work);
+    setLoadingDetails(true);
     setNotice('');
     try {
-      const [details, workChapters] = await Promise.all([provider.getDetails(work.id), provider.getChapters(work.id)]);
+      const workProvider = router.getProvider(work.sourceId || activeSourceId);
+      const [details, workChapters] = await Promise.all([workProvider.getDetails(work.id), workProvider.getChapters(work.id)]);
+      if (!detailsGuardRef.current.isCurrent(requestId)) return;
       setSelectedWork(details);
       setChapters(sortChapters(workChapters));
+      setChapterFeedInfo(workProvider.getChapterFeedInfo?.(work.id) || null);
     } catch (error) {
-      setNotice(error.message || 'Unable to load sample details.');
+      if (!detailsGuardRef.current.isCurrent(requestId)) return;
+      setNotice(error.message || 'Unable to load manga details.');
+    } finally {
+      if (detailsGuardRef.current.isCurrent(requestId)) setLoadingDetails(false);
     }
   }
 
-  async function openReader(chapter) {
+  async function openReader(chapter, { preferOffline = false, returnTo = 'details' } = {}) {
+    const requestId = readerGuardRef.current.next();
     setNotice('');
+    setReaderReturnScreen(returnTo);
     setSelectedChapter(chapter);
     setScreen('reader');
     setPages([]);
@@ -149,10 +226,30 @@ export default function MangaApp() {
     setImageUrl('');
     setPageError('');
     try {
-      const nextPages = sortPages(await provider.getPages(chapter.id));
-      if (!nextPages.length) throw new Error('No pages are available for this chapter.');
       const key = chapterStorageKey(chapter);
+      let nextPages = [];
+      const shouldTryOfflineFirst = preferOffline || !online;
+      if (shouldTryOfflineFirst) {
+        const downloadedIndexes = await storage.getDownloadedPageIndexes(key);
+        if (downloadedIndexes.length) {
+          nextPages = buildOfflinePages(chapter, downloadedIndexes);
+        }
+      }
+      if (!nextPages.length) {
+        if (!online) throw new Error('This chapter is not saved for offline reading. Download it while online.');
+        const chapterProvider = router.getProvider(chapter.sourceId);
+        try {
+          nextPages = sortPages(await chapterProvider.getPages(chapter.id));
+        } catch (fetchError) {
+          const downloadedIndexes = await storage.getDownloadedPageIndexes(key);
+          if (!downloadedIndexes.length) throw fetchError;
+          nextPages = buildOfflinePages(chapter, downloadedIndexes);
+        }
+      }
+      if (!readerGuardRef.current.isCurrent(requestId)) return;
+      if (!nextPages.length) throw new Error('No pages are available for this chapter.');
       const [savedProgress, savedBookmark] = await Promise.all([storage.getReadingProgress(key), storage.getBookmark(key)]);
+      if (!readerGuardRef.current.isCurrent(requestId)) return;
       const restored = restoreReadingPosition(savedProgress, nextPages.length);
       const restoredProgress = { workId: chapter.workId, chapterId: chapter.id, ...restored };
       setPages(nextPages);
@@ -161,7 +258,9 @@ export default function MangaApp() {
       setBookmark(savedBookmark);
       await storage.putReadingProgress(key, restoredProgress);
     } catch (error) {
-      setPageError(error.message || 'Unable to open this sample chapter.');
+      if (readerGuardRef.current.isCurrent(requestId)) {
+        setPageError(error.message || 'Unable to open this chapter.');
+      }
     }
   }
 
@@ -180,7 +279,7 @@ export default function MangaApp() {
       if (!blob) blob = await storage.getCachedPage(key, currentPage.index);
       if (!blob) {
         if (!online) throw new Error('This page is not saved for offline reading. Download the chapter while online.');
-        blob = await provider.getPageImage(currentPage);
+        blob = await router.getProvider(selectedChapter.sourceId).getPageImage(currentPage);
         try {
           await storage.putCachedPage(key, currentPage, blob);
         } catch {
@@ -204,7 +303,7 @@ export default function MangaApp() {
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [screen, selectedChapter, pages, pageIndex, pageAttempt, provider, storage, online]);
+  }, [screen, selectedChapter, pages, pageIndex, pageAttempt, router, storage, online]);
 
   async function goToPage(nextIndex) {
     const clamped = Math.max(0, Math.min(nextIndex, pages.length - 1));
@@ -237,7 +336,7 @@ export default function MangaApp() {
   async function startDownload(chapter) {
     setNotice('');
     try {
-      const result = await manager.download(chapter, { onUpdate: applyJobUpdate });
+      const result = await router.download(chapter, { onUpdate: applyJobUpdate });
       await refreshStorage();
       setNotice(result.status === 'complete' ? `${chapter.title} is saved for offline reading.` : result.error || 'Some pages need a retry.');
     } catch (error) {
@@ -246,7 +345,8 @@ export default function MangaApp() {
   }
 
   async function retryDownload(job) {
-    const chapter = chapters.find(item => item.id === job.chapterId) || {
+    const matchingChapter = chapters.find(item => item.id === job.chapterId && item.sourceId === job.sourceId);
+    const chapter = matchingChapter || {
       id: job.chapterId,
       sourceId: job.sourceId,
       workId: job.workId,
@@ -258,7 +358,7 @@ export default function MangaApp() {
 
   async function deleteDownload(job) {
     try {
-      await manager.cancelAndWait(job.chapterKey);
+      await router.cancelAndWait(job.chapterKey, job.sourceId);
       await storage.deleteDownloadedChapter(job.chapterKey);
       await refreshStorage();
     } catch (error) {
@@ -267,16 +367,49 @@ export default function MangaApp() {
   }
 
   async function openSavedChapter(job) {
+    const savedChapter = {
+      id: job.chapterId,
+      sourceId: job.sourceId,
+      workId: job.workId,
+      title: job.chapterTitle,
+      number: job.chapterNumber,
+      language: 'en',
+      pageCount: job.totalPages || 0,
+      readingSource: { id: job.sourceId, name: job.sourceId === mockCatalogSourceId ? 'Local sample source' : 'Offline copy', language: 'en', workId: job.workId, chapterIds: [job.chapterId] }
+    };
+    const downloadedIndexes = await storage.getDownloadedPageIndexes(job.chapterKey);
+    if (downloadedIndexes.length && (job.status === 'complete' || !online)) {
+      setSelectedWork(current => current?.id === job.workId ? current : {
+        id: job.workId,
+        sourceId: job.sourceId,
+        title: job.chapterTitle || 'Offline chapter',
+        alternateTitles: [],
+        description: '',
+        genres: []
+      });
+      await openReader(savedChapter, { preferOffline: true, returnTo: 'downloads' });
+      return;
+    }
+
     try {
-      const [work, workChapters] = await Promise.all([provider.getDetails(job.workId), provider.getChapters(job.workId)]);
+      const jobProvider = router.getProvider(job.sourceId);
+      const [work, workChapters] = await Promise.all([jobProvider.getDetails(job.workId), jobProvider.getChapters(job.workId)]);
       const orderedChapters = sortChapters(workChapters);
-      const chapter = orderedChapters.find(item => item.id === job.chapterId);
-      if (!chapter) throw new Error('This saved chapter is no longer in the sample catalog.');
+      const chapter = orderedChapters.find(item => item.id === job.chapterId) || savedChapter;
       setSelectedWork(work);
       setChapters(orderedChapters);
-      await openReader(chapter);
-    } catch (error) {
-      setNotice(error.message || 'This saved chapter could not be opened.');
+      setChapterFeedInfo(jobProvider.getChapterFeedInfo?.(job.workId) || null);
+      await openReader(chapter, { preferOffline: true, returnTo: 'details' });
+    } catch {
+      setSelectedWork(current => current?.id === job.workId ? current : {
+        id: job.workId,
+        sourceId: job.sourceId,
+        title: job.chapterTitle || 'Offline chapter',
+        alternateTitles: [],
+        description: '',
+        genres: []
+      });
+      await openReader(savedChapter, { preferOffline: true, returnTo: 'downloads' });
     }
   }
 
@@ -328,9 +461,15 @@ export default function MangaApp() {
           <div>
             <span className="section-kicker">SEASONFETCH / MANGA</span>
             <h1 className="manga-title">Read at your <span>own pace.</span></h1>
-            <p className="manga-subtitle">A local sample catalog for exploring chapters, progress and offline reading.</p>
+            <p className="manga-subtitle">{isLiveSource ? 'Search and read free English chapters via the MangaDex API with private offline caching.' : 'A local sample catalog for exploring chapters, progress and offline reading.'}</p>
           </div>
-          <div className="manga-demo-badge"><i /> MOCK CATALOG · NO LIVE SOURCES</div>
+          <div className="manga-heading-controls">
+            <div className={`manga-demo-badge${isLiveSource ? ' is-live' : ''}`}><i /> {isLiveSource ? 'MANGADEX · LIVE API' : 'SAMPLE CATALOG · LOCAL'}</div>
+            <div className="manga-source-switch" role="group" aria-label="Manga source">
+              <button type="button" className={activeSourceId === mangadexSourceId ? 'is-active' : ''} onClick={() => switchSource(mangadexSourceId)}>MangaDex</button>
+              <button type="button" className={activeSourceId === mockCatalogSourceId ? 'is-active' : ''} onClick={() => switchSource(mockCatalogSourceId)}>Sample</button>
+            </div>
+          </div>
         </div>
 
         {!storageReady && <div className="manga-storage-alert">Opening this browser's private Manga library…</div>}
@@ -341,48 +480,61 @@ export default function MangaApp() {
           <form className="manga-search" onSubmit={searchCatalog}>
             <label htmlFor="manga-query">Find a story</label>
             <div className="manga-search-controls">
-              <input id="manga-query" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search the sample catalog" />
+              <input id="manga-query" value={query} onChange={event => setQuery(event.target.value)} placeholder={isLiveSource ? 'Search MangaDex titles (e.g. Berserk, Frieren, Chainsaw Man)...' : 'Search the sample catalog'} />
               <button className="primary-button" disabled={searching}>{searching ? 'Searching…' : 'Search'}</button>
             </div>
-            <span>Search runs locally against sample data; no external source is contacted.</span>
+            <span>{isLiveSource ? 'Powered by MangaDex public API via SeasonFetch proxy (data-saver pages, credited scanlation groups).' : 'Search runs locally against sample data; no external source is contacted.'}</span>
           </form>
-          <div className="manga-section-heading"><div><span className="section-kicker">LOCAL SAMPLE LIBRARY</span><h2>{query.trim() ? 'Search results' : 'Stories to explore'}</h2></div><span>{results.length} titles</span></div>
+          <div className="manga-section-heading"><div><span className="section-kicker">{isLiveSource ? 'MANGADEX CATALOG' : 'LOCAL SAMPLE LIBRARY'}</span><h2>{query.trim() ? 'Search results' : isLiveSource ? 'Popular on MangaDex' : 'Stories to explore'}</h2></div><span>{searching ? 'Loading…' : `${results.length} titles`}</span></div>
           {results.length ? <div className="manga-work-grid">
             {results.map(work => <button className="manga-work-card" key={work.id} onClick={() => openWork(work)}>
               <Cover work={work} />
-              <span className="manga-work-copy"><strong>{work.title}</strong><small>{work.year} <i /> {work.status} <i /> {work.genres.slice(0, 2).join(' · ')}</small><span>{work.description}</span><em>Open details <b>→</b></em></span>
+              <span className="manga-work-copy"><strong>{work.title}</strong><small>{work.year || 'Year unknown'} <i /> {work.status || 'unknown'}{work.genres?.length ? <> <i /> {work.genres.slice(0, 2).join(' · ')}</> : null}</small><span>{work.description || 'No synopsis available.'}</span><em>Open details <b>→</b></em></span>
             </button>)}
-          </div> : <div className="manga-empty">No sample titles match that search. Try a title or genre.</div>}
+          </div> : <div className="manga-empty">{searching ? 'Loading titles from MangaDex…' : 'No titles matched that search. Try another manga title.'}</div>}
         </section>}
 
         {screen === 'details' && selectedWork && <section className="manga-details">
           <button className="manga-back-link" onClick={() => setScreen('browse')}>← Back to catalog</button>
           <div className="manga-work-banner">
             <Cover work={selectedWork} large />
-            <div className="manga-work-detail-copy"><span className="section-kicker">{selectedWork.status?.toUpperCase() || 'STATUS UNKNOWN'} · {selectedWork.year || 'YEAR UNKNOWN'}</span><h2>{selectedWork.title}</h2><p>{selectedWork.description}</p><div className="manga-tags">{selectedWork.genres.map(genre => <span key={genre}>{genre}</span>)}</div><small>{selectedWork.author ? `Story: ${selectedWork.author}` : ''}{selectedWork.author && selectedWork.artist ? ' · ' : ''}{selectedWork.artist ? `Art: ${selectedWork.artist}` : ''} · {selectedWork.volumes?.length || 0} volumes</small></div>
+            <div className="manga-work-detail-copy"><span className="section-kicker">{selectedWork.status?.toUpperCase() || 'STATUS UNKNOWN'} · {selectedWork.year || 'YEAR UNKNOWN'}</span><h2>{selectedWork.title}</h2><p>{selectedWork.description || 'No synopsis available.'}</p><div className="manga-tags">{(selectedWork.genres || []).map(genre => <span key={genre}>{genre}</span>)}</div><small>{selectedWork.author ? `Story: ${selectedWork.author}` : ''}{selectedWork.author && selectedWork.artist ? ' · ' : ''}{selectedWork.artist ? `Art: ${selectedWork.artist}` : ''}{selectedWork.externalUrl ? <> · <a className="manga-external-inline" href={selectedWork.externalUrl} target="_blank" rel="noreferrer">View on MangaDex ↗</a></> : null}</small></div>
           </div>
-          <div className="manga-section-heading manga-chapter-heading"><div><span className="section-kicker">CHAPTERS</span><h2>Choose a chapter</h2></div><span>{chapters.length} chapters · sorted numerically</span></div>
+          <div className="manga-section-heading manga-chapter-heading"><div><span className="section-kicker">CHAPTERS</span><h2>Choose a chapter</h2></div><span>{loadingDetails ? 'Loading chapters…' : chapterFeedInfo?.truncated ? `Showing ${chapterFeedInfo.loaded} of ${chapterFeedInfo.total} chapter uploads (truncated)` : `${chapters.length} chapters · sorted numerically`}</span></div>
+          {chapterFeedInfo?.truncated && <div className="manga-storage-alert" role="status">Showing the first {chapterFeedInfo.loaded} of {chapterFeedInfo.total} English chapter uploads for this title (multiple scanlation groups may be included).</div>}
           <div className="manga-chapter-list">
             {chapters.map(chapter => {
               const job = jobs.find(item => item.chapterKey === chapterStorageKey(chapter));
               const percent = jobPercent(job);
+              const isExternalOnly = chapter.readableInline === false;
               return <article className="manga-chapter-row" key={chapter.id}>
-                <div className="manga-chapter-copy"><strong>{chapterNumberLabel(chapter)} <span>{chapter.title}</span></strong><small>{chapter.volumeNumber ? `Volume ${chapter.volumeNumber} · ` : ''}{chapter.pageCount} pages · {chapter.language.toUpperCase()} · {chapter.readingSource.name}</small>{job && <div className="manga-mini-progress"><span><i style={{ width: `${percent}%` }} /></span><small>{job.status === 'complete' ? 'Saved offline' : `${job.completedPages?.length || 0}/${job.totalPages} pages · ${job.status}`}</small></div>}</div>
-                <div className="manga-chapter-actions"><button className="secondary-button small-button" onClick={() => openReader(chapter)}>Read</button>{job?.status === 'complete' ? <button className="manga-saved-pill" onClick={() => setScreen('downloads')}>Saved</button> : <button className="primary-button small-button" disabled={!storageReady} onClick={() => startDownload(chapter)}>{job?.status === 'partial' || job?.status === 'failed' ? 'Retry download' : job?.status === 'downloading' ? 'Downloading…' : 'Download'}</button>}</div>
+                <div className="manga-chapter-copy"><strong>{chapterNumberLabel(chapter)} <span>{chapter.title}</span></strong><small>{chapter.volumeNumber ? `Volume ${chapter.volumeNumber} · ` : ''}{isExternalOnly ? 'External official release' : `${chapter.pageCount} pages`} · {chapter.language.toUpperCase()} · {chapter.readingSource.name}</small>{job && <div className="manga-mini-progress"><span><i style={{ width: `${percent}%` }} /></span><small>{job.status === 'complete' ? 'Saved offline' : `${job.completedPages?.length || 0}/${job.totalPages} pages · ${job.status}`}</small></div>}</div>
+                <div className="manga-chapter-actions">
+                  {isExternalOnly && chapter.externalUrl ? (
+                    <a className="secondary-button small-button manga-external-link" href={chapter.externalUrl} target="_blank" rel="noreferrer">Read officially ↗</a>
+                  ) : isExternalOnly ? (
+                    <span className="manga-unavailable-pill">No pages</span>
+                  ) : (
+                    <>
+                      <button className="secondary-button small-button" onClick={() => openReader(chapter, { preferOffline: job?.status === 'complete', returnTo: 'details' })}>Read</button>
+                      {job?.status === 'complete' ? <button className="manga-saved-pill" onClick={() => setScreen('downloads')}>Saved</button> : <button className="primary-button small-button" disabled={!storageReady} onClick={() => startDownload(chapter)}>{job?.status === 'partial' || job?.status === 'failed' ? 'Retry download' : job?.status === 'downloading' ? 'Downloading…' : 'Download'}</button>}
+                    </>
+                  )}
+                </div>
               </article>;
             })}
           </div>
-          {!chapters.length && <div className="manga-empty">No sample chapters are available for this title.</div>}
+          {!loadingDetails && !chapters.length && <div className="manga-empty">No English chapters are currently listed for this title on {isLiveSource ? 'MangaDex' : 'the sample catalog'}.</div>}
         </section>}
 
         {screen === 'reader' && selectedChapter && <section className="manga-reader">
-          <div className="manga-reader-toolbar"><button className="manga-back-link" onClick={() => setScreen('details')}>← Chapters</button><div><span className="section-kicker">{selectedWork?.title || 'Manga'} · {chapterNumberLabel(selectedChapter)}</span><h2>{selectedChapter.title}</h2></div><button className={`manga-bookmark${bookmark?.pageIndex === pageIndex ? ' is-bookmarked' : ''}`} onClick={toggleBookmark} aria-pressed={bookmark?.pageIndex === pageIndex}>{bookmark?.pageIndex === pageIndex ? '★ Bookmarked' : '☆ Bookmark page'}</button></div>
+          <div className="manga-reader-toolbar"><button className="manga-back-link" onClick={() => setScreen(readerReturnScreen)}>{readerReturnScreen === 'downloads' ? '← Offline library' : '← Chapters'}</button><div><span className="section-kicker">{selectedWork?.title || 'Manga'} · {chapterNumberLabel(selectedChapter)}</span><h2>{selectedChapter.title}</h2></div><button className={`manga-bookmark${bookmark?.pageIndex === pageIndex ? ' is-bookmarked' : ''}`} onClick={toggleBookmark} aria-pressed={bookmark?.pageIndex === pageIndex}>{bookmark?.pageIndex === pageIndex ? '★ Bookmarked' : '☆ Bookmark page'}</button></div>
           <div className="manga-reader-stage" aria-live="polite">
             {pageLoading && <div className="manga-reader-message">Loading page…</div>}
-            {pageError && <div className="manga-reader-message is-error"><strong>Page unavailable</strong><span>{pageError}</span><button className="secondary-button small-button" onClick={() => { setOnline(globalThis.navigator?.onLine !== false); if (getReaderRetryTarget(pages.length) === 'chapter') void openReader(selectedChapter); else setPageAttempt(value => value + 1); }}>{getReaderRetryTarget(pages.length) === 'chapter' ? 'Retry chapter' : 'Retry page'}</button></div>}
+            {pageError && <div className="manga-reader-message is-error"><strong>Page unavailable</strong><span>{pageError}</span><button className="secondary-button small-button" onClick={() => { setOnline(globalThis.navigator?.onLine !== false); if (getReaderRetryTarget(pages.length) === 'chapter') void openReader(selectedChapter, { preferOffline: selectedJob?.status === 'complete', returnTo: readerReturnScreen }); else setPageAttempt(value => value + 1); }}>{getReaderRetryTarget(pages.length) === 'chapter' ? 'Retry chapter' : 'Retry page'}</button></div>}
             {imageUrl && <img src={imageUrl} alt={`${selectedChapter.title}, page ${pageIndex + 1}`} className="manga-page-image" />}
           </div>
-          <div className="manga-reader-controls"><button className="secondary-button" disabled={pageIndex <= 0 || !pages.length} onClick={() => void goToPage(pageIndex - 1)}>← Previous</button><div><strong>Page {pages.length ? pageIndex + 1 : 0} <span>/ {pages.length}</span></strong><small>{imageOffline ? 'OFFLINE COPY' : online ? 'SAMPLE SOURCE' : 'TEMPORARY CACHE'}</small></div><button className="primary-button" disabled={pageIndex >= pages.length - 1 || !pages.length} onClick={() => void goToPage(pageIndex + 1)}>Next →</button></div>
+          <div className="manga-reader-controls"><button className="secondary-button" disabled={pageIndex <= 0 || !pages.length} onClick={() => void goToPage(pageIndex - 1)}>← Previous</button><div><strong>Page {pages.length ? pageIndex + 1 : 0} <span>/ {pages.length}</span></strong><small>{imageOffline ? 'OFFLINE COPY' : selectedChapter.sourceId !== mockCatalogSourceId ? 'MANGADEX · DATA SAVER' : online ? 'SAMPLE SOURCE' : 'TEMPORARY CACHE'}</small></div><button className="primary-button" disabled={pageIndex >= pages.length - 1 || !pages.length} onClick={() => void goToPage(pageIndex + 1)}>Next →</button></div>
           <div className="manga-reader-footnote">Progress saves as you move. {progress?.completed ? 'Chapter marked complete.' : selectedJob?.status === 'complete' ? 'This chapter is saved for offline reading.' : 'Download the chapter from its details page for offline reading.'}</div>
         </section>}
 
@@ -400,7 +552,7 @@ export default function MangaApp() {
         </section>}
       </main>
 
-      <footer className="footer manga-footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Manga · local sample data · IndexedDB storage</span></footer>
+      <footer className="footer manga-footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Manga · {isLiveSource ? 'MangaDex API & scanlation groups' : 'local sample data'} · IndexedDB storage</span></footer>
     </div>
   );
 }

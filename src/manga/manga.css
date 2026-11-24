@@ -12,8 +12,19 @@
 .manga-title { margin: 10px 0 8px; color: #f2f0f5; font: 700 clamp(34px, 5vw, 50px)/1.08 'Space Grotesk', sans-serif; letter-spacing: -2.4px; }
 .manga-title span { color: #b28dfc; }
 .manga-subtitle { margin: 0; color: #918c99; font-size: 12px; line-height: 1.6; }
+.manga-heading-controls { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: 0 0 auto; }
 .manga-demo-badge { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid #dcb46f2b; border-radius: 30px; color: #c9ad78; background: #dcb46f0b; font: 9px 'DM Mono', monospace; }
 .manga-demo-badge i { width: 6px; height: 6px; border-radius: 50%; background: #d9b56f; box-shadow: 0 0 8px #d9b56f88; }
+.manga-demo-badge.is-live { border-color: #82d4a336; color: #9ad8ae; background: #2a704016; }
+.manga-demo-badge.is-live i { background: #82d4a3; box-shadow: 0 0 8px #82d4a399; }
+.manga-source-switch { display: inline-flex; padding: 3px; border: 1px solid #ffffff16; border-radius: 9px; background: #14151a; gap: 3px; }
+.manga-source-switch button { min-height: 26px; padding: 4px 10px; border: 0; border-radius: 6px; color: #8c8696; background: transparent; font-size: 9px; font-weight: 600; cursor: pointer; }
+.manga-source-switch button.is-active { color: #f2edfb; background: #a98af530; }
+.manga-cover-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 2; }
+.manga-external-inline { color: #b99aff; text-decoration: none; }
+.manga-external-inline:hover { text-decoration: underline; }
+.manga-external-link { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+.manga-unavailable-pill { padding: 7px 9px; border: 1px solid #ffffff14; border-radius: 7px; color: #857f8e; font-size: 9px; }
 .manga-storage-alert, .manga-notice { display: flex; align-items: center; gap: 9px; margin: 0 0 15px; padding: 11px 13px; border: 1px solid #a98af52b; border-radius: 9px; color: #c4b4e2; background: #a98af50b; font-size: 10px; }
 .manga-storage-alert.is-error { border-color: #d8838e3b; color: #e0a3ab; background: #63242c18; }
 .manga-notice { border-color: #82d4a330; color: #a6d9b6; background: #2a704014; }

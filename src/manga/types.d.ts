@@ -19,6 +19,8 @@ export interface MangaWork {
   genres: string[];
   year?: number;
   coverColor?: string;
+  coverUrl?: string | null;
+  externalUrl?: string | null;
   volumes?: Volume[];
 }
 
@@ -42,6 +44,8 @@ export interface Chapter {
   readingSource: ReadingSource;
   pageCount: number;
   publishedAt?: string;
+  externalUrl?: string | null;
+  readableInline?: boolean;
 }
 
 export interface Page {
@@ -51,6 +55,7 @@ export interface Page {
   index: number;
   label?: string;
   mimeType?: string;
+  imageUrl?: string;
 }
 
 export interface MangaProvider {

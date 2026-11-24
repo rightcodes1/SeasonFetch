@@ -79,7 +79,7 @@ export function createMangaDownloadManager(provider, storage, { locks = globalTh
         try {
           const blob = await provider.getPageImage(page);
           if (active.cancelled) break;
-          if (!(blob instanceof Blob)) throw new Error('The sample source returned an invalid page image.');
+          if (!(blob instanceof Blob)) throw new Error('The manga source returned an invalid page image.');
           const saved = await storage.putDownloadedPageIfCurrent(key, page, blob, token);
           if (!saved) return cancelledResult(job);
           storedIndexes.add(page.index);
@@ -182,9 +182,12 @@ export function createMangaDownloadManager(provider, storage, { locks = globalTh
       active.cancelled = true;
       await active.promise.catch(() => {});
     },
-    async resumeInterrupted({ onUpdate = () => {} } = {}) {
+    async resumeInterrupted({ sourceId, onUpdate = () => {} } = {}) {
       const jobs = await storage.listDownloadJobs();
-      const resumable = jobs.filter(job => ['queued', 'downloading', 'paused'].includes(job.status));
+      const resumable = jobs.filter(job =>
+        ['queued', 'downloading', 'paused'].includes(job.status)
+        && (!sourceId || job.sourceId === sourceId)
+      );
       const results = await Promise.all(resumable.map(async job => {
         const chapter = {
           id: job.chapterId,

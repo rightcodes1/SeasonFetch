@@ -8,6 +8,14 @@ import { searchCinemeta, getSeries, getMovie } from "./services/cinemeta.js";
 import { getSeasonSources, getMovieSources } from "./services/torrentio.js";
 import { explainSourceCandidates, geminiStatus, suggestSearchQueries } from "./services/gemini.js";
 import { requireUser, supabaseRequest, supabaseRpc } from "./services/supabaseAuth.js";
+import {
+  fetchChapterPageImage,
+  fetchCoverImage,
+  getChapterPages,
+  getMangaChapters,
+  getMangaDetails,
+  searchManga
+} from "./services/mangadex.js";
 import { normalizeRankingPreference } from "../shared/rankingPreferences.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -23,6 +31,42 @@ const allowedOrigins = new Set(
 );
 const isSeasonFetchVercelOrigin = origin => /^https:\/\/season-fetch(?:-[a-z0-9-]+)?\.vercel\.app$/.test(origin);
 const geminiRateWindow = new Map();
+
+function createWindowRateLimiter({ maxRequests, windowMs = 60_000, message, maxKeys = 500 }) {
+  const buckets = new Map();
+  return function rateLimitMiddleware(req, res, next) {
+    const key = req.ip || req.headers["x-forwarded-for"] || "unknown";
+    const now = Date.now();
+    if (buckets.size > maxKeys) {
+      for (const [bucketKey, timestamps] of buckets.entries()) {
+        if (!timestamps.some(ts => now - ts < windowMs)) buckets.delete(bucketKey);
+      }
+    }
+    const recent = (buckets.get(key) || []).filter(timestamp => now - timestamp < windowMs);
+    if (recent.length >= maxRequests) {
+      res.set("Retry-After", String(Math.ceil(windowMs / 1000)));
+      return res.status(429).json({ error: message });
+    }
+    recent.push(now);
+    buckets.set(key, recent);
+    return next();
+  };
+}
+
+const rateLimitMangaDexMeta = createWindowRateLimiter({
+  maxRequests: 60,
+  message: "MangaDex API request limit reached. Try again in a minute."
+});
+const rateLimitMangaDexMedia = createWindowRateLimiter({
+  maxRequests: 180,
+  message: "MangaDex image request limit reached. Try again in a minute."
+});
+
+function sendMangaDexError(res, label, error, fallbackMessage) {
+  console.error(`${label}:`, error.message);
+  if (error?.retryAfter) res.set("Retry-After", String(error.retryAfter));
+  return res.status(error.statusCode || 502).json({ error: error.message || fallbackMessage });
+}
 
 function rateLimitGemini(req, res, next) {
   const key = req.ip || req.headers['x-forwarded-for'] || 'unknown';
@@ -241,6 +285,74 @@ app.get("/api/torrentio/movie/:movieId", async (req, res) => {
   } catch (error) {
     console.error("Torrentio movie lookup failed:", error.message);
     return res.status(502).json({ error: "Torrentio is unavailable right now." });
+  }
+});
+
+app.get("/api/manga/mangadex/search", rateLimitMangaDexMeta, async (req, res) => {
+  try {
+    const results = await searchManga(req.query.q, {
+      limit: req.query.limit,
+      language: req.query.language
+    });
+    return res.json({ provider: "mangadex", results });
+  } catch (error) {
+    return sendMangaDexError(res, "MangaDex search failed", error, "MangaDex search is unavailable right now.");
+  }
+});
+
+app.get("/api/manga/mangadex/work/:workId", rateLimitMangaDexMeta, async (req, res) => {
+  try {
+    const work = await getMangaDetails(req.params.workId);
+    return res.json({ provider: "mangadex", work });
+  } catch (error) {
+    return sendMangaDexError(res, "MangaDex work lookup failed", error, "MangaDex metadata is unavailable right now.");
+  }
+});
+
+app.get("/api/manga/mangadex/work/:workId/chapters", rateLimitMangaDexMeta, async (req, res) => {
+  try {
+    const feed = await getMangaChapters(req.params.workId, {
+      language: req.query.language,
+      maxChapters: req.query.limit
+    });
+    return res.json({ provider: "mangadex", chapters: feed.chapters, total: feed.total, truncated: feed.truncated });
+  } catch (error) {
+    return sendMangaDexError(res, "MangaDex chapter feed failed", error, "MangaDex chapters are unavailable right now.");
+  }
+});
+
+app.get("/api/manga/mangadex/chapter/:chapterId/pages", rateLimitMangaDexMeta, async (req, res) => {
+  const quality = req.query.quality === undefined ? "data-saver" : String(req.query.quality);
+  try {
+    const pages = await getChapterPages(req.params.chapterId, { quality });
+    return res.json({ provider: "mangadex", pages });
+  } catch (error) {
+    return sendMangaDexError(res, "MangaDex chapter pages failed", error, "MangaDex chapter pages are unavailable right now.");
+  }
+});
+
+app.get("/api/manga/mangadex/page/:chapterId/:quality/:index", rateLimitMangaDexMedia, async (req, res) => {
+  if (!/^\d+$/.test(req.params.index)) {
+    return res.status(400).json({ error: "Invalid page index." });
+  }
+  try {
+    const { buffer, contentType } = await fetchChapterPageImage(req.params.chapterId, req.params.quality, Number(req.params.index));
+    res.set("Content-Type", contentType);
+    res.set("Cache-Control", "public, max-age=3600");
+    return res.send(buffer);
+  } catch (error) {
+    return sendMangaDexError(res, "MangaDex page image proxy failed", error, "MangaDex page image is unavailable.");
+  }
+});
+
+app.get("/api/manga/mangadex/cover/:mangaId/:fileName", rateLimitMangaDexMedia, async (req, res) => {
+  try {
+    const { buffer, contentType } = await fetchCoverImage(req.params.mangaId, req.params.fileName);
+    res.set("Content-Type", contentType);
+    res.set("Cache-Control", "public, max-age=86400");
+    return res.send(buffer);
+  } catch (error) {
+    return sendMangaDexError(res, "MangaDex cover proxy failed", error, "MangaDex cover image is unavailable.");
   }
 });
 
