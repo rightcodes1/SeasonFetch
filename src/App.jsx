@@ -1049,15 +1049,19 @@ function App() {
 
             {selected.mediaType !== 'movie' ? <>
             <div className="season-toolbar">
-              <div><span className="section-kicker">EPISODE SOURCES</span><h2>Season results</h2></div>
+              <div className="season-toolbar-heading"><span className="section-kicker">EPISODE SOURCES</span><h2>Season results</h2></div>
               <div className="season-controls">
-                <div className="select-wrap"><Icon name="filter" size={15} /><select value={season} onChange={event => { invalidateScan(); setSeason(Number(event.target.value)); setEpisodes([]); setExpanded({}); setProviderMode('ready'); }} aria-label="Choose season">{seasonOptions.map(item => <option key={item} value={item}>{item === 0 ? 'Specials' : `Season ${item}`}</option>)}</select><Icon name="down" size={14} /></div>
-                <div className="select-wrap preference-wrap"><Icon name="trend" size={15} /><select value={torrentioPreference} onChange={event => changeTorrentioPreference(event.target.value)} aria-label="Choose Torrentio ranking preference">{RANKING_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
-                <div className="select-wrap preference-wrap"><Icon name="link" size={15} /><select value={audioPreference} onChange={event => changeAudioPreference(event.target.value)} aria-label="Choose audio filter">{AUDIO_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
-                <div className="select-wrap preference-wrap"><Icon name="spark" size={15} /><select value={resolutionPreference} onChange={event => changeResolutionPreference(event.target.value)} aria-label="Choose resolution filter">{RESOLUTION_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
-                <button className="secondary-button" onClick={copySeasonMagnets} disabled={checking || !episodes.length}><Icon name="copy" size={15} /> Copy season magnets</button>
-                <button className="secondary-button" onClick={downloadSeasonMagnets} disabled={checking || !episodes.length}><Icon name="down" size={15} /> Download .txt</button>
-                <button className="primary-button" onClick={checkSources} disabled={checking}>{checking ? <><span className="spinner spinner-dark" /> Scanning</> : <><Icon name="refresh" size={15} /> Check sources</>}</button>
+                <div className="season-filters">
+                  <div className="select-wrap"><Icon name="filter" size={15} /><select value={season} onChange={event => { invalidateScan(); setSeason(Number(event.target.value)); setEpisodes([]); setExpanded({}); setProviderMode('ready'); }} aria-label="Choose season">{seasonOptions.map(item => <option key={item} value={item}>{item === 0 ? 'Specials' : `Season ${item}`}</option>)}</select><Icon name="down" size={14} /></div>
+                  <div className="select-wrap preference-wrap"><Icon name="trend" size={15} /><select value={torrentioPreference} onChange={event => changeTorrentioPreference(event.target.value)} aria-label="Choose Torrentio ranking preference">{RANKING_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
+                  <div className="select-wrap preference-wrap"><Icon name="link" size={15} /><select value={audioPreference} onChange={event => changeAudioPreference(event.target.value)} aria-label="Choose audio filter">{AUDIO_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
+                  <div className="select-wrap preference-wrap"><Icon name="spark" size={15} /><select value={resolutionPreference} onChange={event => changeResolutionPreference(event.target.value)} aria-label="Choose resolution filter">{RESOLUTION_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
+                </div>
+                <div className="season-actions">
+                  <button className="secondary-button" onClick={copySeasonMagnets} disabled={checking || !episodes.length}><Icon name="copy" size={15} /> Copy season magnets</button>
+                  <button className="secondary-button" onClick={downloadSeasonMagnets} disabled={checking || !episodes.length}><Icon name="down" size={15} /> Download .txt</button>
+                  <button className="primary-button" onClick={checkSources} disabled={checking}>{checking ? <><span className="spinner spinner-dark" /> Scanning</> : <><Icon name="refresh" size={15} /> Check sources</>}</button>
+                </div>
               </div>
             </div>
 
