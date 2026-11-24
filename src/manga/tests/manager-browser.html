@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="UTF-8"><title>Manager browser check</title></head><body><pre id="result">RUNNING</pre><script type="module">
+import { createMockMangaProvider } from '../mockProvider.js';
+import { createMangaStorage, chapterStorageKey } from '../storage.js';
+import { createMangaDownloadManager } from '../downloadManager.js';
+const output=document.querySelector('#result');
+function openDb(){return new Promise((resolve,reject)=>{const r=indexedDB.open('seasonfetch-manga',2);r.onerror=()=>reject(r.error);r.onsuccess=()=>resolve(r.result);});}
+async function run(){
+ const provider=createMockMangaProvider();
+ const chapter=(await provider.getChapters('work-quiet-orbit')).find(item=>item.id==='chapter-orbit-1');
+ const storage=createMangaStorage();
+ const updates=[];
+ const result=await Promise.race([createMangaDownloadManager(provider,storage).download(chapter,{onUpdate:job=>updates.push(job.status+':'+job.completedPages.length)}),new Promise((_,reject)=>setTimeout(()=>reject(new Error('manager timed out')),8000))]);
+ const job=await storage.getDownloadJob(chapterStorageKey(chapter));
+ output.textContent=JSON.stringify({result:result.status,job:job.status,pages:job.completedPages,updates});
+}
+run().catch(async error=>{try{const db=await openDb();const tx=db.transaction(['downloadJobs'],'readonly');const req=tx.objectStore('downloadJobs').getAll();req.onsuccess=()=>{output.textContent='FAIL '+error.message+' JOBS '+JSON.stringify(req.result);db.close();};}catch(readError){output.textContent='FAIL '+error.message+' READ '+readError.message;}});
+</script></body></html>

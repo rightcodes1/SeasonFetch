@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8"><title>Manga retry verification</title></head>
+  <body>
+    <pre id="result">RUNNING</pre>
+    <div id="root"></div>
+    <script type="module">
+      import React from 'react';
+      import { createRoot } from 'react-dom/client';
+      import MangaApp from '../MangaApp.jsx';
+
+      const output = document.querySelector('#result');
+      const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+      const assert = (condition, message) => { if (!condition) throw new Error(message); };
+      async function waitFor(predicate, message) {
+        const deadline = Date.now() + 12000;
+        while (Date.now() < deadline) {
+          const value = await predicate();
+          if (value) return value;
+          await sleep(25);
+        }
+        throw new Error(`Timed out waiting for ${message}`);
+      }
+      function click(element, message) {
+        assert(element, `Missing control: ${message}`);
+        element.click();
+      }
+      function button(label) {
+        return [...document.querySelectorAll('button')].find(item => item.textContent.trim() === label);
+      }
+
+      try {
+        createRoot(document.querySelector('#root')).render(React.createElement(MangaApp));
+        await waitFor(() => document.querySelector('.manga-work-card'), 'mock catalog');
+        click(document.querySelector('.manga-work-card'), 'open first sample work');
+        await waitFor(() => document.querySelectorAll('.manga-chapter-row').length === 4, 'chapter list');
+        const firstChapter = [...document.querySelectorAll('.manga-chapter-row')].find(row => row.textContent.includes('Chapter 1 The Mapmaker'));
+        const originalReverse = Array.prototype.reverse;
+        let failNextReverse = true;
+        Array.prototype.reverse = function (...args) {
+          if (failNextReverse) {
+            failNextReverse = false;
+            throw new Error('Simulated initial page-list request failure');
+          }
+          return originalReverse.apply(this, args);
+        };
+        click(firstChapter?.querySelector('.secondary-button'), 'read chapter with simulated page-list failure');
+        await waitFor(() => button('Retry chapter'), 'chapter retry after missing page list');
+        assert(!document.querySelector('.manga-page-image'), 'page image appeared despite simulated chapter page-list failure');
+        click(button('Retry chapter'), 'retry chapter page-list request');
+        await waitFor(() => document.querySelector('.manga-page-image'), 'recovered first page');
+        assert(document.querySelector('.manga-page-image').alt.includes('page 1'), 'chapter retry did not display the recovered first page');
+        assert(document.querySelector('.manga-reader-controls')?.textContent.includes('Page 1 / 4'), 'reader did not restore first-page position after retry');
+        Array.prototype.reverse = originalReverse;
+
+        click(document.querySelector('.manga-reader-toolbar .manga-back-link'), 'return to chapter list');
+        await waitFor(() => document.querySelectorAll('.manga-chapter-row').length === 4, 'chapter list after chapter retry');
+        const tenthChapter = [...document.querySelectorAll('.manga-chapter-row')].find(row => row.textContent.includes('Chapter 10 The Far Station'));
+        click(tenthChapter?.querySelector('.secondary-button'), 'read chapter with one simulated page-image failure');
+        await waitFor(() => document.querySelector('.manga-page-image')?.alt.includes('page 1'), 'chapter 10 first page');
+        click(button('Next →'), 'navigate to the page with a one-time image failure');
+        await waitFor(() => button('Retry page'), 'page-level retry control');
+        click(button('Retry page'), 'retry failed image request');
+        await waitFor(() => document.querySelector('.manga-page-image')?.alt.includes('page 2'), 'page-level retry image recovery');
+        assert(document.querySelector('.manga-reader-controls')?.textContent.includes('Page 2 / 4'), 'page retry did not remain on the failed page');
+        output.textContent = 'PASS: a simulated initial page-list failure exposed Retry chapter; retry loaded and displayed page 1; the existing one-time page-image failure exposed Retry page and recovered page 2.';
+      } catch (error) {
+        output.textContent = `FAIL: ${error.stack || error.message}`;
+        console.error(error);
+      }
+    </script>
+  </body>
+</html>

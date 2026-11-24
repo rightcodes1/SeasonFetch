@@ -18,6 +18,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .brand-glyph span { position: absolute; z-index: 1; width: 4px; height: 4px; background: #34254e; border-radius: 50%; }
 .accent-text { color: #b89aff; }
 .topbar-right { display: flex; align-items: center; gap: 23px; color: #7c7a84; }
+.manga-route-link { padding: 7px 10px; border: 1px solid #a98bf344; border-radius: 8px; color: #c9b5ff; background: #9e80f714; font-size: 11px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.manga-route-link:hover { border-color: #b89aff88; background: #9e80f726; }
+.manga-route-link:focus-visible { outline: 2px solid #b99aff; outline-offset: 3px; }
 .live-indicator { display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px; border: 1px solid #ffffff10; border-radius: 30px; color: #98929f; font-size: 10px; letter-spacing: .2px; }
 .live-indicator i { width: 6px; height: 6px; border-radius: 50%; background: #82d6a4; box-shadow: 0 0 10px #82d6a4; }
 .topbar-label, .section-kicker, .summary-label, .detail-label { color: #777580; font-size: 9px; font-weight: 700; letter-spacing: 1.45px; }
@@ -256,7 +259,8 @@ h1 span { color: #b28dfc; }
 @media (max-width: 760px) {
   .app-shell { width: min(100% - 26px, 640px); }
   .topbar { height: 68px; }
-  .topbar-right { gap: 10px; }
+  .topbar-right { gap: 8px; }
+  .manga-route-link { padding: 6px 8px; font-size: 10px; }
   .topbar-label { display: none; }
   .hero { padding: 65px 0 50px; }
   h1 { letter-spacing: -2.5px; }
