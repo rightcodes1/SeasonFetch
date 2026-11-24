@@ -60,7 +60,6 @@ try {
     Start-Sleep -Milliseconds 500
   } while ((Get-Date) -lt $deadline)
 
-  Set-Content -Path 'desktop-smoke-ui.txt' -Value $accessibleText -Encoding utf8
   if (-not $accessibleText.Contains('SeasonFetch')) {
     throw 'The SeasonFetch React interface did not appear in the Windows accessibility tree.'
   }
@@ -68,8 +67,55 @@ try {
     throw "The frontend did not receive the native Rust status event. Accessibility text: $accessibleText"
   }
 
+  $searchField = $window.FindFirst(
+    [System.Windows.Automation.TreeScope]::Descendants,
+    [System.Windows.Automation.PropertyCondition]::new(
+      [System.Windows.Automation.AutomationElement]::NameProperty,
+      'Search a TV series'
+    )
+  )
+  if (-not $searchField) { throw 'The desktop search field was not exposed through Windows UI Automation.' }
+  $searchField.SetFocus()
+  $searchField.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Derry Girls')
+  Start-Sleep -Milliseconds 350
+
+  $searchButton = $window.FindFirst(
+    [System.Windows.Automation.TreeScope]::Descendants,
+    [System.Windows.Automation.PropertyCondition]::new(
+      [System.Windows.Automation.AutomationElement]::NameProperty,
+      'Search'
+    )
+  )
+  if (-not $searchButton) { throw 'The desktop search button was not exposed through Windows UI Automation.' }
+  $searchButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+
+  $deadline = (Get-Date).AddSeconds(30)
+  do {
+    Start-Sleep -Milliseconds 500
+    $elements = $window.FindAll(
+      [System.Windows.Automation.TreeScope]::Descendants,
+      [System.Windows.Automation.Condition]::TrueCondition
+    )
+    $names = foreach ($element in $elements) {
+      try {
+        $name = $element.Current.Name
+        if ($name) { $name }
+      } catch {
+        # Ignore transient UI Automation elements that disappear during a render.
+      }
+    }
+    $accessibleText = $names -join "`n"
+    if ($accessibleText.Contains('Matching series') -and $accessibleText.Contains('Derry Girls')) { break }
+  } while ((Get-Date) -lt $deadline)
+
+  if (-not $accessibleText.Contains('Matching series') -or -not $accessibleText.Contains('Derry Girls')) {
+    throw "A submitted search did not return the live Cinemeta result through the desktop API transport. Accessibility text: $accessibleText"
+  }
+  Set-Content -Path 'desktop-smoke-ui.txt' -Value $accessibleText -Encoding utf8
+
   Write-Host 'SeasonFetch UI rendered and exposed through Windows UI Automation.'
   Write-Host 'Native Rust command/event IPC verified from the desktop status indicator.'
+  Write-Host 'Submitted Derry Girls search returned a live Cinemeta result through the desktop API transport.'
   Write-Host 'The required WebView2 runtime is installed on this runner.'
 } finally {
   if ($process -and -not $process.HasExited) {

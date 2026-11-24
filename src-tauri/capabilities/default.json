@@ -6,6 +6,10 @@
   "permissions": [
     "core:default",
     "core:event:allow-listen",
-    "core:event:allow-unlisten"
+    "core:event:allow-unlisten",
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "https://season-fetch.vercel.app/**" }]
+    }
   ]
 }

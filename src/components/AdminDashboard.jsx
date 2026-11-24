@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { apiFetch } from '../services/api.js';
 
 async function getAuthHeaders(supabase) {
   const { data } = await supabase.auth.getSession();
@@ -17,7 +18,7 @@ export default function AdminDashboard({ supabase, onClose }) {
     setBusy(true); setError('');
     try {
       const headers = await getAuthHeaders(supabase);
-      const [usersResponse, logsResponse] = await Promise.all([fetch('/api/admin/users', { headers }), fetch('/api/admin/audit-logs?limit=50', { headers })]);
+      const [usersResponse, logsResponse] = await Promise.all([apiFetch('/api/admin/users', { headers }), apiFetch('/api/admin/audit-logs?limit=50', { headers })]);
       const usersData = await usersResponse.json();
       const logsData = await logsResponse.json();
       if (!usersResponse.ok) throw new Error(usersData.error || 'Unable to load users.');
@@ -35,7 +36,7 @@ export default function AdminDashboard({ supabase, onClose }) {
     setActionUser(user.id); setError('');
     try {
       const headers = { ...(await getAuthHeaders(supabase)), 'content-type': 'application/json' };
-      const response = await fetch(`/api/admin/users/${user.id}/suspension`, { method: 'POST', headers, body: JSON.stringify({ suspended: shouldSuspend, reason }) });
+      const response = await apiFetch(`/api/admin/users/${user.id}/suspension`, { method: 'POST', headers, body: JSON.stringify({ suspended: shouldSuspend, reason }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Suspension action failed.');
       await load();

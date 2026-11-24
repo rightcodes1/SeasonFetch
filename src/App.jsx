@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { apiFetch } from './services/api.js';
 import { cinemeta } from './services/cinemeta.js';
 import { torrentio } from './services/torrentio.js';
 import AuthPanel from './components/AuthPanel.jsx';
@@ -401,7 +402,7 @@ function App() {
   }, [query]);
 
   async function searchWithGeminiAssist(cleanQuery) {
-    const response = await fetch('/api/gemini/search-assist', {
+    const response = await apiFetch('/api/gemini/search-assist', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ query: cleanQuery })
@@ -755,7 +756,7 @@ function App() {
     const candidates = (item.candidates?.length ? item.candidates : [item]).map(toGeminiCandidate);
 
     try {
-      const response = await fetch('/api/gemini/explain-source', {
+      const response = await apiFetch('/api/gemini/explain-source', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ seriesTitle: selected?.title, season, episode: item.number, candidates })
