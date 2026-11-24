@@ -111,7 +111,11 @@ function isValidImdbId(id) {
 }
 
 export async function getSeries(id) {
-  if (!isValidImdbId(id)) throw new Error("Invalid series IMDb ID");
+  if (!isValidImdbId(id)) {
+    const error = new Error("Invalid series IMDb ID");
+    error.statusCode = 400;
+    throw error;
+  }
   const data = await requestJson(`${BASE_URL}/meta/series/${encodeURIComponent(id)}.json`);
   if (!data.meta) {
     const error = new Error("Series not found");
