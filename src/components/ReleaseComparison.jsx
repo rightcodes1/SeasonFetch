@@ -33,11 +33,12 @@ function qualityLabel(candidate) {
   return quality.length ? quality.join(' · ') : 'Not reported';
 }
 
-export default function ReleaseComparison({ item, onSelect, onRestore }) {
+export default function ReleaseComparison({ item, onSelect, onRestore, mediaLabel = 'episode' }) {
   const candidates = Array.isArray(item?.candidates) ? item.candidates : [];
+  const mediaDescription = mediaLabel === 'movie' ? 'this movie' : `episode ${item?.number}`;
 
   return (
-    <section className="alternatives-panel release-comparison" aria-label={`Release comparison for episode ${item.number}`}>
+    <section className="alternatives-panel release-comparison" aria-label={`Release comparison for ${mediaDescription}`}>
       <div className="release-comparison-heading">
         <div className="alternatives-heading">
           <span className="detail-label">ALL AVAILABLE CANDIDATES</span>
@@ -114,7 +115,7 @@ export default function ReleaseComparison({ item, onSelect, onRestore }) {
           })}
         </div>
       ) : (
-        <p className="release-empty">No release candidates were returned for this episode after the active filters.</p>
+        <p className="release-empty">No release candidates were returned for {mediaDescription} after the active filters.</p>
       )}
     </section>
   );

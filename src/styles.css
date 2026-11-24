@@ -29,6 +29,9 @@ main { position: relative; z-index: 1; }
 h1 { margin: 24px 0 15px; color: #f2f0f5; font: 700 clamp(40px, 6vw, 63px)/1.06 'Space Grotesk', sans-serif; letter-spacing: -3.7px; }
 h1 span { color: #b28dfc; }
 .hero-copy { margin: 0 auto; color: #97949e; font-size: 14px; line-height: 1.7; }
+.search-mode { width: fit-content; display: flex; gap: 4px; margin: 22px auto -14px; padding: 4px; border: 1px solid #ffffff12; border-radius: 10px; background: #14151a; }
+.search-mode button { min-width: 92px; padding: 8px 13px; border: 1px solid transparent; border-radius: 7px; color: #85808d; background: transparent; font-size: 10px; font-weight: 600; }
+.search-mode button[aria-pressed="true"] { border-color: #a98af53a; color: #ded1ff; background: #a98af51c; box-shadow: inset 0 0 15px #a98af509; }
 .search-form { width: min(660px, 100%); height: 63px; display: flex; align-items: center; gap: 13px; margin: 29px auto 14px; padding: 7px 8px 7px 18px; border: 1px solid #ffffff1c; border-radius: 14px; background: #191a1f; box-shadow: 0 17px 45px #00000031; transition: border-color .2s, box-shadow .2s; }
 .search-form:focus-within { border-color: #aa8bfa72; box-shadow: 0 17px 50px #00000043, 0 0 0 3px #a98af511; }
 .search-form > svg { flex-shrink: 0; color: #817d8a; }
@@ -93,6 +96,18 @@ h1 span { color: #b28dfc; }
 .card-arrow { width: 27px; height: 27px; display: grid; place-items: center; border: 1px solid #ffffff12; border-radius: 7px; color: #9885ba; }
 .workspace { margin-top: 9px; }
 .series-banner { display: flex; align-items: center; gap: 21px; padding: 22px; border: 1px solid #ffffff12; border-radius: 16px; background: linear-gradient(108deg, #1a1a21 0%, #17171c 100%); box-shadow: 0 14px 40px #0000001e; }
+.movie-release-panel { margin: 24px 0 40px; padding: 19px; border: 1px solid #ffffff12; border-radius: 13px; background: #17181d; }
+.movie-release-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 15px; }
+.movie-release-heading h2 { margin: 5px 0 0; color: #f2f0f6; font: 600 21px 'Space Grotesk', sans-serif; letter-spacing: -.6px; }
+.movie-preferences { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.movie-active-release { display: grid; gap: 13px; padding: 14px; border: 1px solid #a98af52b; border-radius: 10px; background: #a98af508; }
+.movie-active-release-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.movie-active-release-top strong { color: #e4ddec; font-size: 12px; overflow-wrap: anywhere; }
+.movie-active-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.movie-id { color: #afa0d1; font: 10px 'DM Mono', monospace; }
+.movie-unavailable { display: flex; align-items: flex-start; gap: 10px; padding: 14px; border: 1px solid #d8838e2b; border-radius: 9px; color: #d99099; background: #63242c13; font-size: 11px; line-height: 1.5; }
+.movie-unavailable strong { display: block; margin-bottom: 4px; color: #e3a5ad; font-size: 12px; }
+.movie-unavailable p { margin: 0; color: #a98a91; }
 .selected-info { min-width: 0; flex: 1; }
 .selected-topline { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .synced { display: inline-flex; align-items: center; gap: 5px; color: #7bcb9e; font-size: 10px; }
@@ -247,6 +262,7 @@ h1 span { color: #b28dfc; }
   h1 { letter-spacing: -2.5px; }
   .hero-copy br { display: none; }
   .search-form { height: 57px; }
+  .search-mode { margin-bottom: -10px; }
   .search-button { height: 43px; min-width: 74px; padding: 10px 11px; font-size: 11px; }
   .search-hint { gap: 8px; font-size: 9px; }
   .series-grid { grid-template-columns: 1fr; }
@@ -281,6 +297,11 @@ h1 span { color: #b28dfc; }
   .detail-top { align-items: flex-start; flex-direction: column; }
   .detail-actions { width: 100%; justify-content: flex-start; }
   .release-comparison { padding: 11px; }
+  .movie-release-panel { padding: 13px; }
+  .movie-release-heading { align-items: flex-start; flex-direction: column; }
+  .movie-preferences > .select-wrap { flex: 1 1 180px; }
+  .movie-preferences .primary-button { flex: 1 1 100%; }
+  .movie-active-actions > * { flex: 1 1 100%; }
   .release-candidate-heading { flex-direction: column; }
   .release-state-badges { justify-content: flex-start; }
   .release-candidate-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }

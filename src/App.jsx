@@ -206,10 +206,14 @@ function getEpisodeTitle(row, number) {
 
 function App() {
   const [query, setQuery] = useState('breaking bad');
+  const [searchMode, setSearchMode] = useState('series');
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(null);
   const [season, setSeason] = useState(1);
   const [episodes, setEpisodes] = useState([]);
+  const [movieRelease, setMovieRelease] = useState(null);
+  const [movieMetadataLoading, setMovieMetadataLoading] = useState(false);
+  const [movieMetadataError, setMovieMetadataError] = useState('');
   const [expanded, setExpanded] = useState({});
   const [searching, setSearching] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -250,7 +254,9 @@ function App() {
   const [seasonIntegrity, setSeasonIntegrity] = useState(null);
   const scanContextRef = useRef(null);
   scanContextRef.current = {
-    seriesId: selected?.imdbId || null,
+    mediaType: selected?.mediaType || 'series',
+    seriesId: selected?.mediaType === 'movie' ? null : (selected?.imdbId || null),
+    movieId: selected?.mediaType === 'movie' ? selected.imdbId : null,
     season,
     preference: torrentioPreference,
     audioPreference,
@@ -280,7 +286,9 @@ function App() {
 
   function scanContextMatches(expected) {
     const current = scanContextRef.current;
-    return current.seriesId === expected.seriesId
+    return current.mediaType === expected.mediaType
+      && current.seriesId === expected.seriesId
+      && current.movieId === expected.movieId
       && current.season === expected.season
       && current.preference === expected.preference
       && current.audioPreference === expected.audioPreference
@@ -382,8 +390,11 @@ function App() {
     const timer = window.setTimeout(async () => {
       suggestionTimerRef.current = null;
       try {
-        const data = await cinemeta.search(cleanQuery);
-        if (active && requestId === suggestionRequestRef.current) setSearchSuggestions(decorateResults(data.results || []).slice(0, 5));
+        const data = await cinemeta.search(cleanQuery, searchMode === 'movie' ? 'movie' : undefined);
+        if (active && requestId === suggestionRequestRef.current) {
+          const matches = decorateResults(data.results || []).filter(item => searchMode !== 'movie' || item.mediaType === 'movie');
+          setSearchSuggestions(matches.slice(0, 5));
+        }
       } catch {
         if (active && requestId === suggestionRequestRef.current) setSearchSuggestions([]);
       } finally {
@@ -397,9 +408,9 @@ function App() {
       window.clearTimeout(timer);
       if (suggestionTimerRef.current === timer) suggestionTimerRef.current = null;
     };
-  }, [query]);
+  }, [query, searchMode]);
 
-  async function searchWithGeminiAssist(cleanQuery) {
+  async function searchWithGeminiAssist(cleanQuery, mediaType) {
     const response = await fetch('/api/gemini/search-assist', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -408,8 +419,8 @@ function App() {
     if (!response.ok) throw new Error('Gemini search assist failed');
     const data = await response.json();
     for (const suggestion of data.queries || []) {
-      const candidateData = await cinemeta.search(suggestion);
-      const candidateResults = decorateResults(candidateData.results || []);
+      const candidateData = await cinemeta.search(suggestion, mediaType === 'movie' ? 'movie' : undefined);
+      const candidateResults = decorateResults(candidateData.results || []).filter(item => mediaType !== 'movie' || item.mediaType === 'movie');
       if (candidateResults.length) return { results: candidateResults, correctedQuery: suggestion };
     }
     return { results: [], correctedQuery: '' };
@@ -425,8 +436,11 @@ function App() {
     setSearching(true);
     setNotice(null);
     setSearchSuggestions([]);
+    metadataRequestRef.current += 1;
     setSelected(null);
     setEpisodes([]);
+    setMovieRelease(null);
+    setMovieMetadataLoading(false);
     setExpanded({});
     searchCoordinatorRef.current.schedule(async requestId => {
       if (cleanQuery.length < 2) {
@@ -438,13 +452,13 @@ function App() {
       }
 
       try {
-        const data = await cinemeta.search(cleanQuery);
+        const data = await cinemeta.search(cleanQuery, searchMode === 'movie' ? 'movie' : undefined);
         if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
-        let nextResults = decorateResults(data.results || []);
+        let nextResults = decorateResults(data.results || []).filter(item => searchMode !== 'movie' || item.mediaType === 'movie');
         let correctedQuery = '';
         if (!nextResults.length) {
           try {
-            const assisted = await searchWithGeminiAssist(cleanQuery);
+            const assisted = await searchWithGeminiAssist(cleanQuery, searchMode);
             if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
             nextResults = assisted.results;
             correctedQuery = assisted.correctedQuery;
@@ -457,16 +471,63 @@ function App() {
         setSearchSuggestions(nextResults.slice(0, 5));
         setSearching(false);
         if (correctedQuery) setNotice(`Gemini search assist matched “${correctedQuery}”.`);
-        else if (!nextResults.length) setNotice('No series found. Try another title.');
+        else if (!nextResults.length) setNotice(searchMode === 'movie' ? 'No movies found. Try another title.' : 'No series found. Try another title.');
       } catch (error) {
         if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
         console.warn('Cinemeta search failed; using local preview matches.', error);
-        const fallback = SERIES.filter(item => `${item.title} ${item.type}`.toLowerCase().includes(cleanQuery));
+        const fallback = searchMode === 'series' ? SERIES.filter(item => `${item.title} ${item.type}`.toLowerCase().includes(cleanQuery)) : [];
         setResults(fallback);
         setSearching(false);
-        setNotice(fallback.length ? 'Cinemeta is unavailable; showing local preview matches.' : 'No series found. Try another title.');
+        setNotice(fallback.length ? 'Cinemeta is unavailable; showing local preview matches.' : searchMode === 'movie' ? 'Movie search is unavailable right now. Please try again later.' : 'No series found. Try another title.');
       }
     }, 320);
+  }
+
+  async function chooseMovie(movie) {
+    invalidateSearch();
+    invalidateSuggestions();
+    invalidateScan();
+    const requestId = ++metadataRequestRef.current;
+    const imdbId = movie.imdbId || movie.id;
+    const baseMovie = { ...movie, imdbId, mediaType: 'movie' };
+    setSelected(baseMovie);
+    setResults([]);
+    setSearchSuggestions([]);
+    setEpisodes([]);
+    setMovieRelease(null);
+    setMovieMetadataLoading(true);
+    setMovieMetadataError('');
+    setNotice(null);
+    setProviderMode('ready');
+    setToast(`${baseMovie.title} selected`);
+    window.setTimeout(() => setToast(''), 2200);
+
+    if (!/^tt\d+$/.test(String(imdbId || ''))) {
+      setMovieMetadataLoading(false);
+      setProviderMode('error');
+      const message = 'This movie result does not include a valid IMDb ID, so its metadata and releases cannot be loaded.';
+      setMovieMetadataError(message);
+      setNotice(message);
+      return;
+    }
+
+    try {
+      const data = await cinemeta.getMovie(imdbId);
+      if (requestId !== metadataRequestRef.current) return;
+      if (!data.movie) throw new Error('Cinemeta returned no movie metadata.');
+      const movieDetails = { ...baseMovie, ...data.movie, id: baseMovie.id, imdbId, mediaType: 'movie' };
+      setSelected(movieDetails);
+      setMovieMetadataLoading(false);
+      scanMovieSources(movieDetails);
+    } catch (error) {
+      if (requestId !== metadataRequestRef.current) return;
+      console.warn('Cinemeta movie metadata failed:', error);
+      setMovieMetadataLoading(false);
+      setProviderMode('error');
+      const message = `Unable to load movie metadata: ${error.message || 'Cinemeta did not return movie details.'}`;
+      setMovieMetadataError(message);
+      setNotice(message);
+    }
   }
 
   async function chooseSeries(series) {
@@ -488,6 +549,8 @@ function App() {
     };
     setSelected(baseSeries);
     setResults([]);
+    setMovieRelease(null);
+    setMovieMetadataLoading(false);
     setSearchSuggestions([]);
     setNotice(null);
     setSeason(1);
@@ -527,6 +590,7 @@ function App() {
     setTorrentioPreference(value);
     window.localStorage.setItem('seasonfetch:torrentio-preference', value);
     setEpisodes([]);
+    setMovieRelease(null);
     setExpanded({});
     setProviderMode('ready');
     setNotice('Preference changed. Run Check sources to scan with it.');
@@ -537,6 +601,7 @@ function App() {
     setAudioPreference(value);
     window.localStorage.setItem('seasonfetch:audio-preference', value);
     setEpisodes([]);
+    setMovieRelease(null);
     setExpanded({});
     setProviderMode('ready');
     setNotice(value === 'any' ? 'Audio filter cleared.' : 'Audio filter enabled. Run Check sources to scan English dubbed or dual-audio releases.');
@@ -547,9 +612,113 @@ function App() {
     setResolutionPreference(value);
     window.localStorage.setItem('seasonfetch:resolution-preference', value);
     setEpisodes([]);
+    setMovieRelease(null);
     setExpanded({});
     setProviderMode('ready');
     setNotice('Resolution filter changed. Run Check sources to scan with it.');
+  }
+
+  function scanMovieSources(movie) {
+    if (!movie?.imdbId) return;
+    const movieId = movie.imdbId;
+    const scanPreference = torrentioPreference;
+    const scanAudioPreference = audioPreference;
+    const scanResolutionPreference = resolutionPreference;
+    const scanContext = {
+      mediaType: 'movie',
+      seriesId: null,
+      movieId,
+      season,
+      preference: scanPreference,
+      audioPreference: scanAudioPreference,
+      resolutionPreference: scanResolutionPreference
+    };
+
+    invalidateScan();
+    setMovieRelease(null);
+    setNotice(null);
+    setProviderMode('ready');
+    scanCoordinatorRef.current.start({
+      delayMs: 450,
+      request: signal => torrentio.getMovieSources(
+        movieId,
+        scanPreference,
+        scanAudioPreference,
+        { resolution: scanResolutionPreference },
+        { signal }
+      ),
+      onSuccess: data => {
+        if (!scanContextMatches(scanContext)) { invalidateScan(); return; }
+        const recommended = data.selected || null;
+        const candidates = Array.isArray(data.sources) ? [...data.sources] : [];
+        const recommendedId = getReleaseIdentity(recommended);
+        if (recommended && recommendedId && !candidates.some(candidate => getReleaseIdentity(candidate) === recommendedId)) candidates.unshift(recommended);
+        const fields = recommended ? getEpisodeReleaseFields(recommended) : null;
+        const sourceError = recommended && !fields?.magnet
+          ? 'Torrentio returned a recommended release without a valid magnet matching its info hash.'
+          : data.status === 'unavailable' ? 'Torrentio returned no eligible movie releases for the active preferences.' : '';
+        setMovieRelease({
+          id: `movie-${movieId}`,
+          title: movie.title,
+          ...(fields || { status: data.status === 'size-unknown' ? 'size-unknown' : 'unavailable', size: '—', format: '', hash: '', magnet: '', rawMagnet: '', sourceUrl: '', fileIdx: null, trackerCount: 0, fallbackTrackersUsed: false, provider: '', resolution: null, seeders: null, audio: null, audioEvidence: 'unverified', releaseType: null, releaseGroup: null }),
+          status: fields?.status || (data.status === 'size-unknown' ? 'size-unknown' : 'unavailable'),
+          selectionReason: data.selectionReason || '',
+          intelligence: data.intelligence || null,
+          sourceCount: candidates.length,
+          sourceError,
+          candidates,
+          recommendedSource: recommended,
+          recommendedSelectionId: recommendedId,
+          activeSelectionId: recommendedId,
+          manualSelectionId: '',
+          recommendedSelectionReason: data.selectionReason || ''
+        });
+        setProviderMode('live');
+        setToast(`${movie.title} Torrentio lookup complete`);
+        window.setTimeout(() => setToast(''), 2400);
+      },
+      onError: error => {
+        if (!scanContextMatches(scanContext)) { invalidateScan(); return; }
+        if (error?.name === 'AbortError') return;
+        console.warn('Torrentio movie lookup failed:', error);
+        setMovieRelease({
+          id: `movie-${movieId}`,
+          title: movie.title,
+          status: 'provider-error',
+          size: '—',
+          format: '',
+          hash: '',
+          magnet: '',
+          rawMagnet: '',
+          sourceUrl: '',
+          fileIdx: null,
+          trackerCount: 0,
+          fallbackTrackersUsed: false,
+          provider: 'Torrentio',
+          resolution: null,
+          seeders: null,
+          audio: null,
+          audioEvidence: 'unverified',
+          releaseType: null,
+          releaseGroup: null,
+          selectionReason: '',
+          intelligence: null,
+          sourceCount: 0,
+          sourceError: error.message || 'Torrentio could not retrieve movie releases. Try again later.',
+          candidates: [],
+          recommendedSource: null,
+          recommendedSelectionId: '',
+          activeSelectionId: '',
+          manualSelectionId: '',
+          recommendedSelectionReason: ''
+        });
+        setProviderMode('error');
+      }
+    });
+  }
+
+  function checkMovieSources() {
+    if (selected?.mediaType === 'movie' && !movieMetadataLoading) scanMovieSources(selected);
   }
 
   function checkSources() {
@@ -575,7 +744,9 @@ function App() {
 
     const episodeNumbers = baseRows.map(getEpisodeNumber);
     const scanContext = {
+      mediaType: 'series',
       seriesId: scanSeriesId,
+      movieId: null,
       season: scanSeason,
       preference: scanPreference,
       audioPreference: scanAudioPreference,
@@ -778,6 +949,8 @@ function App() {
     setResults([]);
     setSelected(null);
     setEpisodes([]);
+    setMovieRelease(null);
+    setMovieMetadataLoading(false);
     setNotice(null);
     setExpanded({});
     setSearchSuggestions([]);
@@ -799,19 +972,23 @@ function App() {
         </button>
           <div className="topbar-right">
           <span className="live-indicator"><i /> Live discovery</span>
-          <span className="topbar-label">TV SOURCE DISCOVERY</span>
+          <span className="topbar-label">{searchMode === 'movie' ? 'MOVIE SOURCE DISCOVERY' : 'TV SOURCE DISCOVERY'}</span>
           {user ? <AccountMenu supabase={supabase} user={user} profile={profile} isAdmin={isAdmin} onAdmin={() => setShowAdmin(true)} onSignOut={signOut} onProfileUpdated={setProfile} /> : <button className="account-trigger account-sign-in" onClick={() => { if (supabase) setShowAuth(true); else setNotice('Sign-in is unavailable because Supabase authentication is not configured for this deployment.'); }}>Sign in</button>}
         </div>
       </header>
 
       <main>
         <section className="hero">
-          <div className="eyebrow"><span className="eyebrow-dot" /> SEASON SOURCE FINDER</div>
-          <h1>Find your season.<br /><span>One episode at a time.</span></h1>
-          <p className="hero-copy">Discover clean, high-quality sources for every episode.<br className="desktop-only" /> {rankingPreferenceDescription(torrentioPreference)}</p>
+          <div className="eyebrow"><span className="eyebrow-dot" /> {searchMode === 'movie' ? 'MOVIE SOURCE FINDER' : 'SEASON SOURCE FINDER'}</div>
+          <h1>{searchMode === 'movie' ? <>Find your movie.<br /><span>Compare every release.</span></> : <>Find your season.<br /><span>One episode at a time.</span></>}</h1>
+          <p className="hero-copy">{searchMode === 'movie' ? 'Discover and compare available releases for a single movie.' : <>Discover clean, high-quality sources for every episode.<br className="desktop-only" /></>} {rankingPreferenceDescription(torrentioPreference)}</p>
+          <div className="search-mode" role="group" aria-label="Search type">
+            <button type="button" aria-pressed={searchMode === 'series'} onClick={() => { if (searchMode === 'series') return; invalidateSearch(); invalidateSuggestions(); invalidateScan(); metadataRequestRef.current += 1; setSearchMode('series'); setSelected(null); setResults([]); setEpisodes([]); setMovieRelease(null); setMovieMetadataLoading(false); setNotice(null); setSearchTouched(false); }}>Series</button>
+            <button type="button" aria-pressed={searchMode === 'movie'} onClick={() => { if (searchMode === 'movie') return; invalidateSearch(); invalidateSuggestions(); invalidateScan(); metadataRequestRef.current += 1; setSearchMode('movie'); setSelected(null); setResults([]); setEpisodes([]); setMovieRelease(null); setMovieMetadataLoading(false); setNotice(null); setSearchTouched(false); }}>Movies</button>
+          </div>
           <form className="search-form" onSubmit={runSearch}>
             <Icon name="search" size={18} />
-            <input value={query} onChange={event => { invalidateSearch(); setQuery(event.target.value); setSearchTouched(false); }} placeholder="Search a TV series..." aria-label="Search a TV series" />
+            <input value={query} onChange={event => { invalidateSearch(); setQuery(event.target.value); setSearchTouched(false); }} placeholder={searchMode === 'movie' ? 'Search a movie...' : 'Search a TV series...'} aria-label={searchMode === 'movie' ? 'Search movies' : 'Search a TV series'} />
             {query && <button className="clear-search" type="button" onClick={() => { invalidateSearch(); setQuery(''); }} aria-label="Clear search"><Icon name="x" size={15} /></button>}
             <button className="search-button" disabled={searching} type="submit">
               {searching ? <span className="spinner" /> : <>Search <Icon name="arrow" size={15} /></>}
@@ -819,7 +996,7 @@ function App() {
           </form>
           {(suggestionsLoading || searchSuggestions.length > 0) && query.trim().length >= 2 && <div className="search-suggestions" aria-label="Search suggestions">
             {suggestionsLoading && <div className="suggestions-loading"><span className="spinner spinner-dark" /> Finding matching titles…</div>}
-            {!suggestionsLoading && searchSuggestions.map(series => <button className="suggestion-card" key={series.imdbId || series.id} type="button" onClick={() => { setSearchSuggestions([]); chooseSeries(series); }}>
+            {!suggestionsLoading && searchSuggestions.map(series => <button className="suggestion-card" key={series.imdbId || series.id} type="button" onClick={() => { setSearchSuggestions([]); searchMode === 'movie' ? chooseMovie(series) : chooseSeries(series); }}>
               <Poster series={series} />
               <span className="suggestion-card-copy"><strong>{series.title}</strong><span>{series.year || 'Year unavailable'} <i /> {series.type || 'Series'}</span></span>
               <span className="card-arrow"><Icon name="arrow" size={14} /></span>
@@ -834,9 +1011,9 @@ function App() {
 
         {!searching && results.length > 0 && (
           <section className="results-section fade-in">
-            <div className="section-heading"><div><span className="section-kicker">SEARCH RESULTS</span><h2>Matching series</h2></div><span className="result-count">{results.length} matches</span></div>
+            <div className="section-heading"><div><span className="section-kicker">SEARCH RESULTS</span><h2>{searchMode === 'movie' ? 'Matching movies' : 'Matching series'}</h2></div><span className="result-count">{results.length} matches</span></div>
             <div className="series-grid">
-              {results.map(series => <button key={series.id} className="series-card" onClick={() => chooseSeries(series)}>
+              {results.map(series => <button key={series.id} className="series-card" onClick={() => searchMode === 'movie' ? chooseMovie(series) : chooseSeries(series)}>
                 <Poster series={series} />
                 <span className="series-card-copy"><strong>{series.title}</strong><span>{series.year || 'Year unavailable'} <i /> {series.type || 'Series'}</span><em><Icon name="bolt" size={11} /> {series.rating || 'Rating unavailable'}</em></span>
                 <span className="card-arrow"><Icon name="arrow" size={15} /></span>
@@ -849,9 +1026,9 @@ function App() {
           <section className="empty-state fade-in">
             <div className="empty-orbit"><Icon name="search" size={22} /></div>
             <span className="section-kicker">READY WHEN YOU ARE</span>
-            <h2>{searchTouched ? 'Search another title' : 'Start with a series'}</h2>
-            <p>Find a show above to scan seasons, compare available sources, and copy a magnet in one click.</p>
-            <div className="suggestion-row"><span>Try</span>{['Breaking Bad', 'The Bear', 'Severance'].map(title => <button key={title} onClick={() => { setQuery(title); runSearch(undefined, title); }}>{title}</button>)}</div>
+            <h2>{searchTouched ? 'Search another title' : searchMode === 'movie' ? 'Start with a movie' : 'Start with a series'}</h2>
+            <p>{searchMode === 'movie' ? 'Choose a movie to load metadata, compare Torrentio releases, and copy an individual magnet.' : 'Find a show above to scan seasons, compare available sources, and copy a magnet in one click.'}</p>
+            <div className="suggestion-row"><span>Try</span>{(searchMode === 'movie' ? ['The Matrix', 'Arrival', 'Dune'] : ['Breaking Bad', 'The Bear', 'Severance']).map(title => <button key={title} onClick={() => { setQuery(title); runSearch(undefined, title); }}>{title}</button>)}</div>
           </section>
         )}
 
@@ -860,15 +1037,16 @@ function App() {
             <div className="series-banner">
               <Poster series={selected} large />
               <div className="selected-info">
-                <div className="selected-topline"><span className="section-kicker">SELECTED SERIES</span>{providerMode === 'live' ? <span className="synced"><i /> Torrentio live</span> : providerMode === 'partial' ? <span className="synced partial-provider"><Icon name="dots" size={12} /> Torrentio partial</span> : providerMode === 'error' ? <span className="synced error-provider"><Icon name="x" size={12} /> Provider error</span> : providerMode === 'demo' ? <span className="synced demo-provider"><Icon name="dots" size={12} /> Preview fallback</span> : <span className="synced"><Icon name="check" size={12} /> Metadata synced</span>}</div>
+                <div className="selected-topline"><span className="section-kicker">{selected.mediaType === 'movie' ? 'SELECTED MOVIE' : 'SELECTED SERIES'}</span>{movieMetadataLoading ? <span className="synced"><span className="spinner spinner-dark" /> Loading movie metadata</span> : providerMode === 'live' ? <span className="synced"><i /> Torrentio live</span> : providerMode === 'partial' ? <span className="synced partial-provider"><Icon name="dots" size={12} /> Torrentio partial</span> : providerMode === 'error' ? <span className="synced error-provider"><Icon name="x" size={12} /> Provider error</span> : providerMode === 'demo' ? <span className="synced demo-provider"><Icon name="dots" size={12} /> Preview fallback</span> : <span className="synced"><Icon name="check" size={12} /> Metadata synced</span>}</div>
                 <h2>{selected.title}</h2>
-                <div className="selected-meta"><span>{selected.year}</span><i /> <span>{selected.type}</span><i /> <span><Icon name="bolt" size={12} /> {selected.rating}</span></div>
+                <div className="selected-meta"><span>{selected.year || 'Year unavailable'}</span><i /> <span>{selected.type || (selected.mediaType === 'movie' ? 'Movie' : 'Series')}</span><i /> <span><Icon name="bolt" size={12} /> {selected.rating || 'Rating unavailable'}</span>{selected.mediaType === 'movie' && <><i /><span className="movie-id">IMDb {selected.imdbId}</span></>}</div>
                 <p className="synopsis">{selected.synopsis}</p>
                 <div className="genre-row">{(selected.genres || []).map(genre => <span key={genre}>{genre}</span>)}</div>
               </div>
-              <button className="change-button" onClick={() => { invalidateScan(); setSelected(null); setEpisodes([]); setResults(SERIES); }}>Change series <Icon name="arrow" size={14} /></button>
+              <button className="change-button" onClick={() => { invalidateScan(); metadataRequestRef.current += 1; setSelected(null); setEpisodes([]); setMovieRelease(null); if (selected.mediaType === 'movie') runSearch(undefined, query); else setResults(SERIES); }}>{selected.mediaType === 'movie' ? 'Change movie' : 'Change series'} <Icon name="arrow" size={14} /></button>
             </div>
 
+            {selected.mediaType !== 'movie' ? <>
             <div className="season-toolbar">
               <div><span className="section-kicker">EPISODE SOURCES</span><h2>Season results</h2></div>
               <div className="season-controls">
@@ -923,6 +1101,30 @@ function App() {
             </>}
 
             {!episodes.length && !checking && <div className="pre-scan"><div className="pre-scan-icon"><Icon name="bolt" size={21} /></div><div><strong>Ready to scan {selected.title}</strong><span>Select a season and check sources to see episode availability.</span></div><button className="text-action" onClick={checkSources}>Run first scan <Icon name="arrow" size={14} /></button></div>}
+            </> : <div className="movie-release-panel">
+              <div className="movie-release-heading"><div><span className="section-kicker">SINGLE MOVIE RELEASES</span><h2>Compare available sources</h2></div><span className="result-count">{movieRelease ? `${movieRelease.sourceCount} candidates` : 'IMDb metadata · Torrentio sources'}</span></div>
+              {movieMetadataLoading && <div className="scan-panel"><span className="scan-pulse"><Icon name="bolt" size={16} /></span><div><strong>Loading movie metadata</strong><span>Resolving IMDb details before requesting movie releases…</span></div><div className="scan-line"><i /></div></div>}
+              {!movieMetadataLoading && <>
+                <div className="movie-preferences">
+                  <div className="select-wrap preference-wrap"><Icon name="trend" size={15} /><select value={torrentioPreference} onChange={event => changeTorrentioPreference(event.target.value)} aria-label="Choose Torrentio ranking preference">{RANKING_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
+                  <div className="select-wrap preference-wrap"><Icon name="link" size={15} /><select value={audioPreference} onChange={event => changeAudioPreference(event.target.value)} aria-label="Choose audio filter">{AUDIO_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
+                  <div className="select-wrap preference-wrap"><Icon name="spark" size={15} /><select value={resolutionPreference} onChange={event => changeResolutionPreference(event.target.value)} aria-label="Choose resolution filter">{RESOLUTION_PREFERENCES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><Icon name="down" size={14} /></div>
+                  <button className="primary-button" type="button" onClick={checkMovieSources} disabled={checking || movieMetadataLoading}>{checking ? <><span className="spinner spinner-dark" /> Checking</> : <><Icon name="refresh" size={15} /> Check movie sources</>}</button>
+                </div>
+                {checking && <div className="scan-panel"><span className="scan-pulse"><Icon name="bolt" size={16} /></span><div><strong>Checking movie releases</strong><span>Retrieving candidates with the active ranking, audio, and resolution preferences…</span></div><div className="scan-line"><i /></div></div>}
+                {movieRelease && !checking && movieRelease.magnet && <div className="movie-active-release">
+                  <div className="movie-active-release-top"><div><span className="detail-label">ACTIVE TORRENTIO RELEASE</span><strong>{movieRelease.format || selected.title}</strong></div><StatusBadge status={movieRelease.status} /></div>
+                  <div className="detail-meta"><span><b>Resolution</b>{movieRelease.resolution || 'Unknown'}</span><span><b>File size</b>{movieRelease.size}</span>{movieRelease.audio && <span><b>Audio</b>{movieRelease.audio === 'dual-audio' ? 'Dual audio' : 'English dubbed'}</span>}<span><b>Audio evidence</b>{movieRelease.audioEvidence === 'explicit-english-dub' ? 'Explicit English Dub' : movieRelease.audioEvidence === 'possible-english-audio' ? 'Possible English Audio' : 'Unverified'}</span>{movieRelease.seeders !== null && <span><b>Seeders</b>{movieRelease.seeders.toLocaleString()}</span>}{movieRelease.provider && <span><b>Provider</b>{movieRelease.provider}</span>}<span><b>Info hash</b>{movieRelease.hash.slice(0, 12)}…</span>{movieRelease.fileIdx !== null && <span><b>File index</b>{movieRelease.fileIdx}</span>}</div>
+                  <div className="magnet-line"><code>{movieRelease.magnet}</code><a href={movieRelease.magnet} aria-label="Open movie magnet">Open</a><button type="button" onClick={() => copyMagnet(movieRelease.magnet)} aria-label="Copy movie magnet"><Icon name="copy" size={14} /></button></div>
+                  <div className="movie-active-actions">{movieRelease.sourceUrl && <a className="secondary-button small-button" href={movieRelease.sourceUrl} target="_blank" rel="noreferrer">Open source <Icon name="arrow" size={13} /></a>}<a className="secondary-button small-button" href={movieRelease.magnet}>Open magnet <Icon name="link" size={13} /></a><button type="button" className="secondary-button small-button" onClick={() => copyMagnet(movieRelease.magnet)}><Icon name="copy" size={14} /> Copy magnet</button>{movieRelease.rawMagnet && <button type="button" className="secondary-button small-button" onClick={() => copyRawMagnet(movieRelease)}><Icon name="copy" size={14} /> Copy raw magnet</button>}</div>
+                  {movieRelease.selectionReason && <p className="detail-note"><Icon name="bolt" size={13} /> {movieRelease.selectionReason}</p>}
+                </div>}
+                {movieRelease && !checking && !movieRelease.magnet && <div className="movie-unavailable"><Icon name="x" size={16} /><div><strong>{movieRelease.status === 'provider-error' ? 'Movie sources could not be retrieved' : 'No eligible movie release is available'}</strong><p>{movieRelease.sourceError || (movieRelease.status === 'provider-error' ? 'Torrentio could not answer the request. Try again later.' : getNoSourceCopy(resolutionPreference))}</p></div></div>}
+                {!movieRelease && !checking && !movieMetadataLoading && movieMetadataError && <div className="movie-unavailable"><Icon name="x" size={16} /><div><strong>Movie metadata is unavailable</strong><p>{movieMetadataError}</p><button type="button" className="secondary-button small-button" onClick={() => chooseMovie(selected)}>Retry metadata</button></div></div>}
+                {!movieRelease && !checking && !movieMetadataLoading && !movieMetadataError && <div className="pre-scan"><div className="pre-scan-icon"><Icon name="bolt" size={21} /></div><div><strong>Ready to compare {selected.title}</strong><span>Ranking: {rankingPreferenceHint(torrentioPreference)} · {resolutionLabel} · {audioPreference === 'any' ? 'Any audio' : 'English audio filter'}</span></div><button className="text-action" onClick={checkMovieSources}>Check movie sources <Icon name="arrow" size={14} /></button></div>}
+                {movieRelease && !checking && <ReleaseComparison item={movieRelease} mediaLabel="movie" onSelect={candidate => setMovieRelease(current => selectEpisodeRelease([current], current.id, candidate)[0])} onRestore={() => setMovieRelease(current => restoreEpisodeRecommendation([current], current.id)[0])} />}
+              </>}
+            </div>}
           </section>
         )}
       </main>

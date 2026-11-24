@@ -6,10 +6,14 @@ async function request(path) {
 }
 
 export const cinemeta = {
-  search(query) {
-    return request(`/api/cinemeta/search?q=${encodeURIComponent(query)}`);
+  search(query, type) {
+    const movieType = type === 'movie' ? '&type=movie' : '';
+    return request(`/api/cinemeta/search?q=${encodeURIComponent(query)}${movieType}`);
   },
   getSeries(id) {
     return request(`/api/cinemeta/series/${encodeURIComponent(id)}`);
+  },
+  getMovie(imdbId) {
+    return request(`/api/cinemeta/movie/${encodeURIComponent(imdbId)}`);
   }
 };

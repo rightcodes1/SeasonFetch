@@ -29,6 +29,24 @@ async function requestStreams(seriesId, season, episode) {
   return Array.isArray(data.streams) ? data.streams : [];
 }
 
+async function requestMovieStreams(movieId) {
+  if (!/^tt\d+$/.test(movieId)) throw new Error("Invalid movie IMDb ID");
+
+  const url = `${BASE_URL}/stream/movie/${encodeURIComponent(movieId)}.json`;
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "SeasonFetch/1.0"
+    },
+    signal: AbortSignal.timeout(20000)
+  });
+
+  if (!response.ok) throw new Error(`Torrentio returned HTTP ${response.status}`);
+
+  const data = await response.json();
+  return Array.isArray(data.streams) ? data.streams : [];
+}
+
 export async function getEpisodeSources(seriesId, season, episode, preference = "smallest-acceptable", audioMode = "any", filters = {}) {
   const streams = await requestStreams(seriesId, season, episode);
   const intelligence = processTorrentioResults(streams, {
@@ -78,6 +96,34 @@ function selectionReason(release) {
     release.seeders === null ? "seeder count unknown" : `${release.seeders} seeders`,
     release.audio.classification === "explicit-english-dub" ? "explicit English Dub metadata" : release.audio.classification === "possible-english-audio" ? "possible English audio metadata" : "audio language unverified"
   ].join(", ");
+}
+
+export async function getMovieSources(movieId, preference = "smallest-acceptable", audioMode = "any", filters = {}) {
+  const streams = await requestMovieStreams(movieId);
+  const intelligence = processTorrentioResults(streams, {
+    mediaType: "movie",
+    profile: recommendationProfileForPreference(preference),
+    filters,
+    audioMode
+  });
+  const selectedRelease = intelligence.recommendations[recommendationKey(preference)] || intelligence.ranked[0] || null;
+  const selected = selectedRelease?.source || null;
+  const candidates = intelligence.ranked.map(release => release.source);
+
+  return {
+    status: selected ? selected.sizeBytes === null ? "size-unknown" : "selected" : "unavailable",
+    selected,
+    sources: candidates,
+    intelligence: {
+      validatedCount: intelligence.validated.length,
+      eligible: intelligence.eligible,
+      rejected: intelligence.rejected,
+      duplicateGroupCount: intelligence.duplicateGroups.length,
+      recommendations: intelligence.recommendations,
+      ranked: intelligence.ranked
+    },
+    selectionReason: selectedRelease ? selectionReason(selectedRelease) : "No source met the active hard filters."
+  };
 }
 
 export async function getSeasonSources(seriesId, season, episodeNumbers, preference = "smallest-acceptable", audioMode = "any", filters = {}) {
