@@ -24,6 +24,7 @@ Write-Host "WebView2 runtime found under: $webViewRuntime"
 
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+Add-Type -AssemblyName System.Windows.Forms
 $process = Start-Process -FilePath $app -PassThru
 try {
   $deadline = (Get-Date).AddSeconds(45)
@@ -76,7 +77,16 @@ try {
   )
   if (-not $searchField) { throw 'The desktop search field was not exposed through Windows UI Automation.' }
   $searchField.SetFocus()
-  $searchField.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Derry Girls')
+  [System.Windows.Forms.SendKeys]::SendWait('^a')
+  [System.Windows.Forms.SendKeys]::SendWait('Derry Girls')
+  $searchValuePattern = $searchField.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+  $inputDeadline = (Get-Date).AddSeconds(5)
+  do {
+    $searchValue = $searchValuePattern.Current.Value
+    if ($searchValue -eq 'Derry Girls') { break }
+    Start-Sleep -Milliseconds 100
+  } while ((Get-Date) -lt $inputDeadline)
+  if ($searchValue -ne 'Derry Girls') { throw "The controlled search field did not receive the test query. Current value: '$searchValue'" }
   Start-Sleep -Milliseconds 350
 
   $searchButton = $window.FindFirst(

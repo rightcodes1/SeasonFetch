@@ -466,7 +466,7 @@ function App() {
         const fallback = SERIES.filter(item => `${item.title} ${item.type}`.toLowerCase().includes(cleanQuery));
         setResults(fallback);
         setSearching(false);
-        setNotice(fallback.length ? 'Cinemeta is unavailable; showing local preview matches.' : 'No series found. Try another title.');
+        setNotice(fallback.length ? 'Cinemeta is unavailable; showing local preview matches.' : `Cinemeta search failed: ${error.message}`);
       }
     }, 320);
   }
