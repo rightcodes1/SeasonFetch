@@ -1,5 +1,6 @@
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 const API_ORIGIN = "https://generativelanguage.googleapis.com/v1beta";
+export const GEMINI_TIMEOUT_MS = 15_000;
 
 function getApiKey() {
   return String(process.env.GEMINI_API_KEY || "").trim();
@@ -53,9 +54,13 @@ export async function suggestSearchQueries(query = "") {
     `User query: ${cleanQuery}`
   ].join("\n");
 
-  const response = await fetch(`${API_ORIGIN}/models/${encodeURIComponent(DEFAULT_MODEL)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+  const response = await fetch(`${API_ORIGIN}/models/${encodeURIComponent(DEFAULT_MODEL)}:generateContent`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "x-goog-api-key": apiKey
+    },
+    signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: { temperature: 0, responseMimeType: "application/json", maxOutputTokens: 120 }
@@ -90,9 +95,13 @@ export async function explainSourceCandidates({ seriesTitle = "", season, episod
     `Candidates: ${JSON.stringify(safeCandidates)}`
   ].join("\n");
 
-  const response = await fetch(`${API_ORIGIN}/models/${encodeURIComponent(DEFAULT_MODEL)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+  const response = await fetch(`${API_ORIGIN}/models/${encodeURIComponent(DEFAULT_MODEL)}:generateContent`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "x-goog-api-key": apiKey
+    },
+    signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
