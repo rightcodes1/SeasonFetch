@@ -536,6 +536,75 @@ async function executeResolvedSearch(spec, mediaType, mode, { limit, now }) {
     }
   }
 
+  // 1B. Native-language / non-Latin script search (e.g., "進撃の巨人", "君の名は", "오징어 게임"):
+  //     query Cinemeta directly with the raw script while keeping conservative confidence (no auto-select).
+  if (spec.nonLatinScript && spec.rawQuery.length >= 2) {
+    const { items, stale, upstreamFetched } = await fetchCatalogVariant(spec.rawQuery, mediaType, now);
+    if (upstreamFetched) upstreamRequests += 1;
+    if (stale) usedStale = true;
+
+    let candidates = items;
+    let hydratedCount = 0;
+    if (mode === "full" && candidates.length > 0) {
+      const maxHydrate = Math.min(CINEMETA_CACHE_CONFIG.hydration.fullModeMaxCandidates, candidates.length);
+      const hydratedOutputs = await mapWithConcurrency(
+        candidates.slice(0, maxHydrate),
+        CINEMETA_CACHE_CONFIG.hydration.concurrency,
+        candidate => hydrateCandidate(candidate, mediaType, now)
+      );
+      candidates = [
+        ...hydratedOutputs.map(out => {
+          if (out.hydrated) hydratedCount += 1;
+          if (out.stale) usedStale = true;
+          if (out.upstreamFetched) upstreamRequests += 1;
+          return out.candidate;
+        }),
+        ...candidates.slice(maxHydrate)
+      ];
+    }
+
+    const seenIds = new Set();
+    const publicResults = [];
+    for (const candidate of candidates) {
+      const id = candidate.imdbId || candidate.id;
+      if (seenIds.has(id)) continue;
+      seenIds.add(id);
+      publicResults.push(toPublicCandidate(candidate, mediaType));
+    }
+
+    const effectiveLimit = limit ?? (mode === "autocomplete" ? CINEMETA_CACHE_CONFIG.autocompleteLimit : null);
+    const sliced = Number.isInteger(effectiveLimit) && effectiveLimit > 0
+      ? publicResults.slice(0, effectiveLimit)
+      : publicResults;
+
+    return {
+      results: sliced,
+      resolution: {
+        query: spec.rawQuery,
+        normalizedQuery: spec.normalizedQuery,
+        mediaType,
+        mode,
+        directImdbLookup: false,
+        yearHint: spec.yearHint,
+        aliasUsed: null,
+        searchedQueries: [spec.rawQuery],
+        confidence: sliced.length > 0 ? "low" : "none",
+        exactMatch: false,
+        ambiguous: false,
+        ambiguityReason: "",
+        selectedCandidateId: null,
+        needsFallback: true,
+        hydratedCount,
+        duplicateIdConflicts: [],
+        cache: {
+          hit: false,
+          stale: usedStale,
+          upstreamRequests
+        }
+      }
+    };
+  }
+
   // 2. Catalog search across prioritized deterministic query variants (short-circuiting early)
   const maxVariants = mode === "autocomplete"
     ? CINEMETA_CACHE_CONFIG.variants.autocompleteMax
@@ -594,17 +663,26 @@ async function executeResolvedSearch(spec, mediaType, mode, { limit, now }) {
       idx => hydrateCandidate(outcome.ranked[idx].candidate, mediaType, now)
     );
 
-    const updatedCandidates = outcome.ranked.map(entry => entry.candidate);
+    const hydratedByRankIdx = new Map();
     for (let i = 0; i < hydrateIndices.length; i += 1) {
       const targetIdx = hydrateIndices[i];
       const result = hydratedOutputs[i];
-      updatedCandidates[targetIdx] = result.candidate;
+      hydratedByRankIdx.set(targetIdx, result.candidate);
       if (result.hydrated) hydratedCount += 1;
       if (result.stale) usedStale = true;
       if (result.upstreamFetched) upstreamRequests += 1;
     }
 
-    // Re-rank after hydration so newly populated year/rating/title metadata refines ranking.
+    // Re-rank after hydration in original upstream catalog order so catalog popularity rank
+    // stays consistent while newly hydrated years/ratings/titles refine ranking.
+    const updatedCandidates = outcome.ranked
+      .map((entry, idx) => ({
+        catalogRank: entry.catalogRank,
+        candidate: hydratedByRankIdx.has(idx) ? hydratedByRankIdx.get(idx) : entry.candidate
+      }))
+      .sort((a, b) => a.catalogRank - b.catalogRank)
+      .map(entry => entry.candidate);
+
     outcome = rankCandidates(spec, updatedCandidates, mediaType);
   }
 
@@ -660,7 +738,7 @@ export async function searchCinemetaWithResolution(query, mediaType = "series", 
     return buildEmptyResolution(spec, mediaType, mode);
   }
 
-  if (!spec.isDirectImdbLookup && !spec.plausible) {
+  if (!spec.isDirectImdbLookup && !spec.nonLatinScript && !spec.plausible) {
     return buildEmptyResolution(spec, mediaType, mode);
   }
 

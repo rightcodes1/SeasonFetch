@@ -81,9 +81,9 @@ export function canReuseAutocompleteEntry(entry, rawQuery, mediaType, now = Date
     if (res.needsFallback || res.confidence === 'low' || res.confidence === 'none') {
       return false;
     }
-    // If the user specified a release year and autocomplete catalog items lack years,
-    // let full search run so metadata hydration can disambiguate remakes accurately.
-    if (res.yearHint !== null && entry.results.some(item => !item?.year)) {
+    // If results are ambiguous or the user specified a release year and autocomplete items lack years,
+    // let full search run so metadata hydration populates release years and ratings.
+    if ((res.yearHint !== null || res.ambiguous) && entry.results.some(item => !item?.year)) {
       return false;
     }
   }

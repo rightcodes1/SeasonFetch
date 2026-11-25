@@ -466,6 +466,7 @@ function evaluateTokenAlignment(queryTokens, candTokens) {
       typoHits: 0,
       significantExactHits: 0,
       significantTypoHits: 0,
+      leadingMatch: false,
       orderedCoverage: 0,
       jaccard: 0,
       stopwordOnly: false
@@ -477,8 +478,10 @@ function evaluateTokenAlignment(queryTokens, candTokens) {
   let typoHits = 0;
   let significantExactHits = 0;
   let significantTypoHits = 0;
+  let leadingMatch = false;
   let lastMatchedCandIdx = -1;
   let orderedHits = 0;
+  const candLeadIdx = STOP_WORDS.has(candTokens[0]) && candTokens.length > 1 ? 1 : 0;
 
   for (let qIdx = 0; qIdx < queryTokens.length; qIdx++) {
     const qTok = queryTokens[qIdx];
@@ -497,6 +500,7 @@ function evaluateTokenAlignment(queryTokens, candTokens) {
       usedCand.add(bestIdx);
       exactHits += 1;
       if (isSig) significantExactHits += 1;
+      if (qIdx === 0 && (bestIdx === 0 || bestIdx === candLeadIdx)) leadingMatch = true;
       if (bestIdx > lastMatchedCandIdx) {
         orderedHits += 1;
         lastMatchedCandIdx = bestIdx;
@@ -504,7 +508,8 @@ function evaluateTokenAlignment(queryTokens, candTokens) {
       continue;
     }
 
-    // 2. Bounded per-token typo match (only for non-short tokens, length >= 5)
+    // 2. Bounded per-token typo match (only for non-short tokens, length >= 5;
+    //    edit distance 2 requires matching first character so unrelated words like "avngers"/"rangers" do not cross-match)
     let bestTypoIdx = -1;
     let bestDist = Infinity;
     for (let i = 0; i < candTokens.length; i++) {
@@ -513,7 +518,7 @@ function evaluateTokenAlignment(queryTokens, candTokens) {
       const maxDist = maxAllowedTokenEditDistance(qTok, cTok);
       if (maxDist === 0) continue;
       const dist = damerauLevenshtein(qTok, cTok, maxDist);
-      if (dist <= maxDist && dist < bestDist) {
+      if (dist <= maxDist && (dist <= 1 || qTok[0] === cTok[0]) && dist < bestDist) {
         bestDist = dist;
         bestTypoIdx = i;
       }
@@ -523,6 +528,7 @@ function evaluateTokenAlignment(queryTokens, candTokens) {
       usedCand.add(bestTypoIdx);
       typoHits += 1;
       if (isSig) significantTypoHits += 1;
+      if (qIdx === 0 && (bestTypoIdx === 0 || bestTypoIdx === candLeadIdx)) leadingMatch = true;
       if (bestTypoIdx > lastMatchedCandIdx) {
         orderedHits += 0.85;
         lastMatchedCandIdx = bestTypoIdx;
@@ -542,6 +548,7 @@ function evaluateTokenAlignment(queryTokens, candTokens) {
     typoHits,
     significantExactHits,
     significantTypoHits,
+    leadingMatch,
     orderedCoverage,
     jaccard,
     stopwordOnly
@@ -776,7 +783,7 @@ export function deduplicateCandidates(candidates = [], mediaType = null) {
   return results;
 }
 
-export function scoreCandidate(queryOrSpec, candidate, mediaType) {
+export function scoreCandidate(queryOrSpec, candidate, mediaType, scoringOptions = {}) {
   const isPreparsedSpec = Boolean(queryOrSpec && typeof queryOrSpec === "object");
   const targetMediaType = normalizeMediaType(
     mediaType !== undefined
@@ -786,6 +793,9 @@ export function scoreCandidate(queryOrSpec, candidate, mediaType) {
   const spec = isPreparsedSpec
     ? queryOrSpec
     : parseSearchQuery(queryOrSpec, targetMediaType);
+  const catalogRank = Number.isInteger(scoringOptions?.catalogRank) && scoringOptions.catalogRank >= 0
+    ? scoringOptions.catalogRank
+    : null;
 
   const imdbId = String(candidate?.imdbId || candidate?.id || "").trim().toLowerCase();
   const rawTitle = String(candidate?.title || candidate?.name || "").trim();
@@ -897,7 +907,7 @@ export function scoreCandidate(queryOrSpec, candidate, mediaType) {
     evidence.exactTitleMatch = true;
     evidence.yearPartOfTitle = true;
     evidence.yearCompatibility = "in-title";
-    baseScore = 0.92;
+    baseScore = 0.96;
     reasons.push("Exact normalized title match (trailing number is part of title)");
   }
   // 2B. Exact match against raw query before noise stripping (preserves literal titles containing noise words)
@@ -1052,7 +1062,9 @@ export function scoreCandidate(queryOrSpec, candidate, mediaType) {
         evidence.prefixMatch = true;
         evidence.matchType = "prefix";
         const lengthRatio = Math.min(1, spec.normalizedQuery.length / candNorm.length);
-        baseScore = 0.62 + 0.20 * lengthRatio;
+        // Keep shortness bonus gentle so subtitles on popular franchise hits (e.g. "Jurassic World: Chaos Theory",
+        // "Dune: Part Two") are not buried beneath obscure 2-word titles ("Jurassic CSI", "Dune World").
+        baseScore = 0.66 + 0.03 * lengthRatio;
         if (spec.isShortQuery) {
           evidence.shortTitleGuardApplied = true;
           baseScore = Math.min(baseScore, 0.72);
@@ -1141,7 +1153,14 @@ export function scoreCandidate(queryOrSpec, candidate, mediaType) {
           } else {
             evidence.matchType = "weak-typo";
             evidence.typoOnlyCapped = true;
-            baseScore = Math.min(0.42, 0.20 + 0.25 * alignment.jaccard);
+            const sigRecall = (alignment.significantExactHits + alignment.significantTypoHits)
+              / Math.max(1, spec.significantTokens.length);
+            // Weight query recall rather than candidate shortness so partial/misspelled franchise
+            // queries ("jurrasic", "avngers", "strnger") do not invert popularity in favor of obscure short titles.
+            baseScore = Math.min(
+              0.42,
+              0.20 + 0.12 * sigRecall + (alignment.leadingMatch ? 0.01 : 0) + 0.01 * alignment.jaccard
+            );
             reasons.push(`Weak typo similarity (edit distance ${distance})`);
           }
         }
@@ -1193,6 +1212,7 @@ export function scoreCandidate(queryOrSpec, candidate, mediaType) {
   if (spec.yearHint !== null && !evidence.yearPartOfTitle) {
     if (candYear === null) {
       evidence.yearCompatibility = "unknown";
+      yearAdjustment = -0.06;
       reasons.push(`Candidate missing release year (requested ${spec.yearHint})`);
     } else if (candYear === spec.yearHint) {
       evidence.yearCompatibility = "exact";
@@ -1214,7 +1234,24 @@ export function scoreCandidate(queryOrSpec, candidate, mediaType) {
   evidence.metadataCompleteness = completeness.bonus;
   const completenessBonus = baseScore >= 0.45 ? completeness.bonus : 0;
 
-  let finalScore = roundScore(baseScore + yearAdjustment + completenessBonus);
+  // 9. Bounded upstream catalog-popularity signal (preserves Cinemeta popularity ordering within
+  //    broad prefix/partial/weak-typo tiers; NEVER elevates irrelevant items or bypasses confidence caps)
+  let catalogRankBonus = 0;
+  if (
+    catalogRank !== null
+    && baseScore >= 0.20
+    && evidence.matchType !== "none"
+    && !evidence.aliasTitleConflict
+  ) {
+    const rankWeight = (
+      evidence.matchType === "prefix"
+      || evidence.matchType === "weak-typo"
+      || evidence.matchType === "token-overlap"
+    ) ? 0.07 : 0.015;
+    catalogRankBonus = Number((rankWeight / (1 + catalogRank * 0.25)).toFixed(4));
+  }
+
+  let finalScore = roundScore(baseScore + yearAdjustment + completenessBonus + catalogRankBonus);
 
   // Hard cap 1: spelling similarity alone must NEVER produce a high-confidence score.
   if (evidence.typoOnlyCapped) {
@@ -1286,6 +1323,9 @@ export function scoreCandidate(queryOrSpec, candidate, mediaType) {
 
 function compareRankedEntries(a, b) {
   if (b.evidence.score !== a.evidence.score) return b.evidence.score - a.evidence.score;
+  const inTitleA = a.evidence.yearPartOfTitle ? 1 : 0;
+  const inTitleB = b.evidence.yearPartOfTitle ? 1 : 0;
+  if (inTitleB !== inTitleA) return inTitleB - inTitleA;
   const exactA = a.evidence.exactTitleMatch || a.evidence.aliasMatch || a.evidence.alternateTitleMatch ? 1 : 0;
   const exactB = b.evidence.exactTitleMatch || b.evidence.aliasMatch || b.evidence.alternateTitleMatch ? 1 : 0;
   if (exactB !== exactA) return exactB - exactA;
@@ -1295,6 +1335,7 @@ function compareRankedEntries(a, b) {
   const ratingA = Number(a.candidate.rating ?? a.candidate.imdbRating) || 0;
   const ratingB = Number(b.candidate.rating ?? b.candidate.imdbRating) || 0;
   if (ratingB !== ratingA) return ratingB - ratingA;
+  if (a.catalogRank !== b.catalogRank) return a.catalogRank - b.catalogRank;
   return String(a.candidate.imdbId || "").localeCompare(String(b.candidate.imdbId || ""));
 }
 
@@ -1310,9 +1351,10 @@ export function rankCandidates(queryOrSpec, rawCandidates = [], mediaType) {
     : parseSearchQuery(queryOrSpec, targetMediaType);
 
   const deduped = deduplicateCandidates(rawCandidates, targetMediaType);
-  const scored = deduped.map(candidate => ({
+  const scored = deduped.map((candidate, index) => ({
     candidate,
-    evidence: scoreCandidate(spec, candidate, targetMediaType)
+    catalogRank: index,
+    evidence: scoreCandidate(spec, candidate, targetMediaType, { catalogRank: index })
   }));
 
   scored.sort(compareRankedEntries);

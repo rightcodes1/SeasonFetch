@@ -146,13 +146,16 @@ test("query parser preserves legitimate numeric/year titles and avoids corruptin
   assert.ok(ww84.searchQueries.some(v => v.normalized === "wonder woman 1984"));
 
   // Titles legitimately ending in a 4-digit year match themselves at HIGH confidence without mismatch penalty
+  // even alongside an unhydrated/yearless candidate with an earlier IMDb ID ("tt4283448" < "tt7126948")
   const wwOutcome = rankCandidates("Wonder Woman 1984", [
     makeCandidate({ imdbId: "tt0451279", title: "Wonder Woman", year: "2017", rating: "7.4", mediaType: "movie" }),
-    makeCandidate({ imdbId: "tt7126948", title: "Wonder Woman 1984", year: "2020", rating: "5.4", mediaType: "movie" })
+    makeCandidate({ imdbId: "tt7126948", title: "Wonder Woman 1984", year: null, rating: null, mediaType: "movie" }),
+    makeCandidate({ imdbId: "tt4283448", title: "Wonder Woman", year: null, rating: null, mediaType: "movie" })
   ], "movie");
   assert.equal(wwOutcome.topCandidate.imdbId, "tt7126948");
   assert.equal(wwOutcome.confidence, "high");
   assert.equal(wwOutcome.ambiguous, false);
+  assert.equal(wwOutcome.selectedCandidate.imdbId, "tt7126948");
   assert.equal(wwOutcome.ranked[0].evidence.yearPartOfTitle, true);
   assert.equal(wwOutcome.ranked[0].evidence.yearCompatibility, "in-title");
 
@@ -467,6 +470,44 @@ test("typo safety blocks stopword-assisted & <=7-char single-significant-token t
   }
 
   assert.equal(damerauLevenshtein("silver", "sliver"), 1);
+
+  // REGRESSION: misspelled/prefix franchise queries preserve Cinemeta popularity rank over obscure short titles
+  const jurassicCatalog = [
+    makeCandidate({ imdbId: "tt29899148", title: "Jurassic World: Chaos Theory", year: null, rating: null }),
+    makeCandidate({ imdbId: "tt10436228", title: "Jurassic World: Camp Cretaceous", year: null, rating: null }),
+    makeCandidate({ imdbId: "tt6101862", title: "Lego Jurassic World: The Indominus Escape", year: null, rating: null }),
+    makeCandidate({ imdbId: "tt10872880", title: "Lego Jurassic World: Legend of Isla Nublar", year: null, rating: null }),
+    makeCandidate({ imdbId: "tt1258908", title: "Jurassic Fight Club", year: null, rating: null }),
+    makeCandidate({ imdbId: "tt1945727", title: "Jurassic CSI", year: null, rating: null }),
+    makeCandidate({ imdbId: "tt4762192", title: "Jurassic Cubs", year: null, rating: null }),
+    makeCandidate({ imdbId: "tt50288465", title: "Jurassic Project", year: null, rating: null }),
+    makeCandidate({ imdbId: "tt15173192", title: "Our Jurassic Family", year: null, rating: null })
+  ];
+  const jurrasicTypo = rankCandidates("jurrasic", jurassicCatalog, "series");
+  assert.equal(jurrasicTypo.results[0].imdbId, "tt29899148");
+  assert.equal(jurrasicTypo.results[1].imdbId, "tt10436228");
+  assert.ok(jurrasicTypo.results.slice(0, 5).map(r => r.imdbId).includes("tt6101862"));
+  assert.equal(jurrasicTypo.confidence, "low");
+  assert.equal(jurrasicTypo.selectedCandidate, null);
+  assert.equal(jurrasicTypo.needsFallback, true);
+
+  const jurassicPrefix = rankCandidates("jurassic", jurassicCatalog, "series");
+  assert.equal(jurassicPrefix.results[0].imdbId, "tt29899148");
+  assert.equal(jurassicPrefix.results[1].imdbId, "tt10436228");
+  assert.equal(jurassicPrefix.selectedCandidate, null);
+
+  // REGRESSION: edit distance 2 with mismatched initial ("avngers" vs "rangers") must NOT cross-match
+  const avngersOutcome = rankCandidates("avngers", [
+    makeCandidate({ imdbId: "tt4154796", title: "Avengers: Endgame", year: null, rating: null, mediaType: "movie" }),
+    makeCandidate({ imdbId: "tt0848228", title: "The Avengers", year: null, rating: null, mediaType: "movie" }),
+    makeCandidate({ imdbId: "tt4154756", title: "Avengers: Infinity War", year: null, rating: null, mediaType: "movie" }),
+    makeCandidate({ imdbId: "tt3717490", title: "Power Rangers", year: null, rating: null, mediaType: "movie" })
+  ], "movie");
+  assert.deepEqual(
+    avngersOutcome.results.slice(0, 3).map(r => r.imdbId),
+    ["tt0848228", "tt4154796", "tt4154756"]
+  );
+  assert.equal(avngersOutcome.ranked.find(e => e.candidate.imdbId === "tt3717490").evidence.matchType, "none");
 });
 
 test("short-title safeguards apply to leading-article variants and partial prefixes remain ambiguous", () => {

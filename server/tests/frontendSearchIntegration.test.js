@@ -106,12 +106,21 @@ test("autocomplete cache reuses matching query+mediaType and rejects mismatched 
   }, t0);
   assert.equal(cache.getReusable("the castle", "movie", t0 + 1_000), null);
 
-  // Year-hinted query whose autocomplete items lack release years MUST NOT reuse (let full hydration run)
+  // Year-hinted or ambiguous remake queries whose autocomplete items lack release years MUST NOT reuse
   cache.set("Dune 2021", "movie", {
     results: [{ ...bbItem, id: "tt1160419", imdbId: "tt1160419", title: "Dune", year: null, mediaType: "movie" }],
     resolution: { confidence: "medium", needsFallback: false, yearHint: 2021, mediaType: "movie", mode: "autocomplete" }
   }, t0);
   assert.equal(cache.getReusable("Dune 2021", "movie", t0 + 1_000), null);
+
+  cache.set("Oldboy", "movie", {
+    results: [
+      { ...bbItem, id: "tt0364569", imdbId: "tt0364569", title: "Oldboy", year: null, mediaType: "movie" },
+      { ...bbItem, id: "tt1321511", imdbId: "tt1321511", title: "Oldboy", year: null, mediaType: "movie" }
+    ],
+    resolution: { confidence: "medium", ambiguous: true, needsFallback: false, yearHint: null, mediaType: "movie", mode: "autocomplete" }
+  }, t0);
+  assert.equal(cache.getReusable("Oldboy", "movie", t0 + 1_000), null);
 
   // Older API payload without `resolution` metadata still works gracefully without crashing
   cache.set("Arrival", "movie", {

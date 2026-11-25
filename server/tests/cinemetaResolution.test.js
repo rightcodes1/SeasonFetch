@@ -510,26 +510,41 @@ test("LRU + TTL cache, in-flight coalescing, stale-on-error fallback, implausibl
         meta: { id: "tt7126948", type: "movie", name: "Wonder Woman 1984", year: "2020", imdbRating: "5.4" }
       });
     }
+    if (path === "/catalog/series/top/search=%E9%80%B2%E6%92%83%E3%81%AE%E5%B7%A8%E4%BA%BA.json") {
+      return Response.json({
+        metas: [{ id: "tt2560140", type: "series", name: "Attack on Titan", year: "2013" }]
+      });
+    }
+    if (path === "/meta/series/tt2560140.json") {
+      return Response.json({
+        meta: { id: "tt2560140", type: "series", name: "Attack on Titan", year: "2013-2023", imdbRating: "9.1" }
+      });
+    }
     return Response.json({ metas: [] });
   });
 
-  // Implausible & non-Latin queries trigger 0 upstream requests
-  const nonLatin = await searchCinemetaWithResolution("進撃の巨人", "series");
-  assert.equal(nonLatin.results.length, 0);
-  assert.equal(nonLatin.resolution.needsFallback, true);
-  assert.equal(upstreamCount, 0);
-
+  // Gibberish triggers 0 upstream requests
   const gibberish = await searchCinemetaWithResolution("zxqwkjhgf", "series");
   assert.equal(gibberish.results.length, 0);
   assert.equal(gibberish.resolution.needsFallback, false);
   assert.equal(upstreamCount, 0);
+
+  // Native-language / non-Latin queries pass raw script to Cinemeta while staying conservative (needsFallback=true, no auto-select)
+  const nonLatin = await searchCinemetaWithResolution("進撃の巨人", "series");
+  assert.equal(nonLatin.results.length, 1);
+  assert.equal(nonLatin.results[0].imdbId, "tt2560140");
+  assert.equal(nonLatin.resolution.confidence, "low");
+  assert.equal(nonLatin.resolution.selectedCandidateId, null);
+  assert.equal(nonLatin.resolution.needsFallback, true);
+  assert.deepEqual(nonLatin.resolution.searchedQueries, ["進撃の巨人"]);
+  const afterNonLatinCount = upstreamCount;
 
   // 5 concurrent identical searches coalesce into 1 catalog + 1 meta request (2 upstream calls total)
   const t0 = 1_700_000_000_000;
   const concurrent = await Promise.all(
     Array.from({ length: 5 }, () => searchCinemetaWithResolution("Severance", "series", { now: t0 }))
   );
-  assert.equal(upstreamCount, 2);
+  assert.equal(upstreamCount - afterNonLatinCount, 2);
   for (const res of concurrent) {
     assert.equal(res.results[0].imdbId, "tt11280740");
     assert.equal(res.resolution.confidence, "high");
@@ -538,7 +553,7 @@ test("LRU + TTL cache, in-flight coalescing, stale-on-error fallback, implausibl
 
   // Subsequent request within TTL hits cache with 0 additional upstream requests
   const cached = await searchCinemetaWithResolution("Severance", "series", { now: t0 + 60_000 });
-  assert.equal(upstreamCount, 2);
+  assert.equal(upstreamCount - afterNonLatinCount, 2);
   assert.equal(cached.resolution.cache.hit, true);
   assert.equal(cached.resolution.cache.stale, false);
   assert.equal(cached.resolution.cache.upstreamRequests, 0);
