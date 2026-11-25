@@ -1,5 +1,7 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
+export const SUPABASE_TIMEOUT_MS = 15_000;
+
 let cachedJwksUrl = '';
 let cachedJwks = null;
 
@@ -45,6 +47,8 @@ export async function supabaseRequest(path, token, options = {}) {
   if (!supabaseUrl || !supabaseAnonKey) throw new Error('Supabase server integration is not configured.');
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
     ...options,
+    redirect: 'error',
+    signal: options.signal || AbortSignal.timeout(SUPABASE_TIMEOUT_MS),
     headers: {
       apikey: supabaseAnonKey,
       Authorization: `Bearer ${token}`,
@@ -68,6 +72,8 @@ export async function supabaseRpc(name, args, token) {
   if (!supabaseUrl || !supabaseAnonKey) throw new Error('Supabase server integration is not configured.');
   const response = await fetch(`${supabaseUrl}/rest/v1/rpc/${name}`, {
     method: 'POST',
+    redirect: 'error',
+    signal: AbortSignal.timeout(SUPABASE_TIMEOUT_MS),
     headers: {
       apikey: supabaseAnonKey,
       Authorization: `Bearer ${token}`,

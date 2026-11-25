@@ -68,6 +68,8 @@ function tabCount(tabId, counts) {
 export default function LibraryView({
   user,
   authConfigured,
+  suspended = false,
+  suspensionReason = "",
   items = [],
   counts,
   loading = false,
@@ -105,6 +107,28 @@ export default function LibraryView({
                 Sign in to open My Library <ArrowIcon />
               </button>
             )}
+            <button type="button" className="secondary-button" onClick={onGoDiscover}>
+              Continue discovering
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (suspended) {
+    return (
+      <section className="library-section fade-in" aria-label="Personal library">
+        <div className="empty-state library-empty-card">
+          <div className="empty-orbit"><BookmarkIcon /></div>
+          <span className="section-kicker">ACCOUNT SUSPENDED</span>
+          <h2>Personal Library is currently restricted</h2>
+          <p>
+            {suspensionReason
+              ? `Reason: ${suspensionReason}. Public movie and TV discovery remains available.`
+              : "Your account is currently suspended. Personal Library actions are disabled while public movie and TV discovery remains available."}
+          </p>
+          <div className="library-cta-row">
             <button type="button" className="secondary-button" onClick={onGoDiscover}>
               Continue discovering
             </button>

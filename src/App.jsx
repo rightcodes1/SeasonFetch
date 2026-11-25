@@ -10,10 +10,10 @@ import SaveToLibraryControl from './components/SaveToLibraryControl.jsx';
 import { authConfigured, supabase } from './services/supabase.js';
 import ReleaseComparison from './components/ReleaseComparison.jsx';
 import { usePersonalLibrary } from './hooks/usePersonalLibrary.js';
+import { useAuthController } from './auth/useAuthController.js';
 import { parseSectionFromPath, pushSectionPath } from './utils/navigation.js';
 import { getEpisodeReleaseFields, getReleaseIdentity, restoreEpisodeRecommendation, selectEpisodeRelease } from './utils/releaseSelection.js';
 import { copyTextToClipboard } from './utils/clipboard.js';
-import { signOutFromAuth } from './utils/accountActions.js';
 import { createScanCoordinator } from './utils/scanCoordinator.js';
 import { createSearchCoordinator } from './utils/searchCoordinator.js';
 import { toGeminiCandidate } from './utils/geminiCandidates.js';
@@ -224,12 +224,8 @@ function App() {
   const [geminiLoading, setGeminiLoading] = useState({});
   const [searchSuggestions, setSearchSuggestions] = useState([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
-  const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const recoveryLinkDetected = window.location.hash.includes('type=recovery') || new URLSearchParams(window.location.search).has('code');
-  const [showAuth, setShowAuth] = useState(recoveryLinkDetected);
-  const [authMode, setAuthMode] = useState(recoveryLinkDetected ? 'reset' : 'sign-in');
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState('sign-in');
   const [showAdmin, setShowAdmin] = useState(false);
   const suggestionRequestRef = useRef(0);
   const suggestionTimerRef = useRef(null);
@@ -275,6 +271,21 @@ function App() {
     }, 2400);
   }, []);
 
+  const auth = useAuthController({
+    supabase,
+    onToast: showToastMessage,
+    onNotice: setNotice
+  });
+  const user = auth.authenticatedUser;
+  const profile = auth.profile;
+  const isAdmin = auth.isAdmin;
+
+  useEffect(() => {
+    if (!auth.isAdmin || auth.suspended || !auth.authenticatedUser) {
+      setShowAdmin(false);
+    }
+  }, [auth.isAdmin, auth.suspended, auth.authenticatedUser?.id]);
+
   const openSignInPrompt = useCallback(() => {
     if (supabase) {
       setAuthMode('sign-in');
@@ -287,7 +298,9 @@ function App() {
   const library = usePersonalLibrary({
     supabase,
     user,
+    suspended: auth.suspended,
     onRequireAuth: openSignInPrompt,
+    onSessionExpired: auth.handleSessionExpired,
     onToast: showToastMessage,
     onNotice: setNotice
   });
@@ -352,61 +365,9 @@ function App() {
     if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
   }, []);
 
-  useEffect(() => {
-    if (!supabase) return undefined;
-    let active = true;
-    supabase.auth.getSession().then(({ data }) => {
-      if (active) setUser(data.session?.user || null);
-    });
-    if (recoveryLinkDetected) {
-      setAuthMode('reset');
-      setShowAuth(true);
-    }
-    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
-      setUser(session?.user || null);
-      if (event === 'PASSWORD_RECOVERY' || (recoveryLinkDetected && event === 'SIGNED_IN')) {
-        setAuthMode('reset');
-        setShowAuth(true);
-      }
-      if (!session) setIsAdmin(false);
-      if (!session) setProfile(null);
-    });
-    return () => {
-      active = false;
-      listener.subscription.unsubscribe();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!supabase || !user) return undefined;
-    let active = true;
-    supabase.from('profiles').select('*').eq('id', user.id).maybeSingle().then(({ data }) => {
-      if (active) setProfile(data || null);
-    });
-    return () => { active = false; };
-  }, [user]);
-
-  useEffect(() => {
-    if (!supabase || !user) return undefined;
-    let active = true;
-    supabase.rpc('is_admin').then(({ data, error }) => {
-      if (active) setIsAdmin(!error && data === true);
-    });
-    return () => { active = false; };
-  }, [user]);
-
   async function signOut() {
-    if (!supabase) {
-      setNotice('Sign-out is unavailable because Supabase authentication is not configured.');
-      return;
-    }
-    try {
-      await signOutFromAuth(supabase.auth);
-      setToast('Signed out');
-      window.setTimeout(() => setToast(''), 2200);
-    } catch (error) {
-      setNotice(`Unable to sign out: ${error.message || 'Supabase did not confirm sign-out.'}`);
-    }
+    setShowAdmin(false);
+    await auth.signOut();
   }
 
   function decorateResults(items) {
@@ -1030,18 +991,70 @@ function App() {
         user={user}
         supabase={supabase}
         profile={profile}
+        profileLoading={auth.profileLoading}
+        profileError={auth.profileError}
+        suspended={auth.suspended}
+        suspensionReason={auth.suspensionReason}
         isAdmin={isAdmin}
         onAdmin={() => setShowAdmin(true)}
         onSignOut={signOut}
-        onProfileUpdated={setProfile}
+        onProfileUpdated={auth.setProfile}
+        onRetryProfile={auth.retryAccountSync}
         onSignIn={openSignInPrompt}
       />
+
+      {auth.suspended && (
+        <div className="account-status-banner is-suspended" role="alert">
+          <div>
+            <strong>Account suspended</strong>
+            <span>
+              {auth.suspensionReason
+                ? `${auth.suspensionReason} — Public movie and TV discovery remains available.`
+                : 'Personal Library and profile edits are restricted while public discovery remains available.'}
+            </span>
+          </div>
+          <button type="button" className="secondary-button small-button" onClick={signOut}>
+            Sign out
+          </button>
+        </div>
+      )}
+
+      {auth.sessionExpiredMessage && !user && (
+        <div className="account-status-banner" role="alert">
+          <div>
+            <strong>Session expired</strong>
+            <span>{auth.sessionExpiredMessage}</span>
+          </div>
+          <div className="account-status-actions">
+            <button type="button" className="primary-button small-button" onClick={() => { auth.dismissSessionNotice(); openSignInPrompt(); }}>
+              Sign in again
+            </button>
+            <button type="button" className="secondary-button small-button" onClick={auth.dismissSessionNotice}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {auth.emailVerifiedNotice && (
+        <div className="account-status-banner is-verified" role="status">
+          <div>
+            <strong>Email verified</strong>
+            <span>Your email address has been confirmed. You can now use your SeasonFetch account.</span>
+          </div>
+          <button type="button" className="secondary-button small-button" onClick={auth.dismissSessionNotice}>
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <main>
         {activeSection === 'library' ? (
           <LibraryView
             user={user}
             authConfigured={authConfigured}
+            suspended={auth.suspended}
+            suspensionReason={auth.suspensionReason}
             items={library.items}
             counts={library.counts}
             loading={library.loading}
@@ -1240,8 +1253,28 @@ function App() {
 
       <footer className="footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Metadata: Cinemeta live <i /> Sources: Torrentio proxy <i /> {resolutionLabel}</span></footer>
       {toast && <div className="toast"><span className="toast-icon"><Icon name="check" size={14} /></span>{toast}</div>}
-      {showAuth && supabase && <AuthPanel key={authMode} supabase={supabase} initialMode={authMode} contextNote={library.pendingSave ? `Sign in or create a free account to save “${library.pendingSave.payload.title}” to your library.` : ''} onClose={reason => { setShowAuth(false); setAuthMode('sign-in'); if (reason !== 'authenticated') library.cancelPendingSave(); }} />}
-      {showAdmin && isAdmin && <AdminDashboard supabase={supabase} onClose={() => setShowAdmin(false)} />}
+      {(showAuth || auth.isRecovering) && supabase && (
+        <AuthPanel
+          key={auth.isRecovering ? 'recovery-flow' : authMode}
+          supabase={supabase}
+          initialMode={authMode}
+          recoveryStatus={auth.status}
+          recoveryError={auth.recoveryError}
+          onCompleteReset={auth.completePasswordReset}
+          onCancelRecovery={auth.cancelRecovery}
+          onSwitchToAuthMode={nextMode => {
+            setAuthMode(nextMode);
+            setShowAuth(true);
+          }}
+          contextNote={library.pendingSave ? `Sign in or create a free account to save “${library.pendingSave.payload.title}” to your library.` : ''}
+          onClose={reason => {
+            setShowAuth(false);
+            setAuthMode('sign-in');
+            if (reason !== 'authenticated') library.cancelPendingSave();
+          }}
+        />
+      )}
+      {showAdmin && isAdmin && !auth.suspended && <AdminDashboard supabase={supabase} onClose={() => setShowAdmin(false)} />}
     </div>
   );
 }
