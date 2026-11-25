@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { sendPasswordRecovery } from "../utils/accountActions.js";
 import { avatarPathForSelection, getAvatarPresentation } from "../utils/profileAvatar.js";
-import { getRecoveryRedirectUrl } from "../auth/authStateMachine.js";
+import { getRecoveryRedirectUrl, normalizeAuthError } from "../auth/authStateMachine.js";
+import { formatCooldownDuration, isEmailRateLimitError } from "../auth/emailCooldown.js";
+import { useEmailCooldown } from "../auth/useEmailCooldown.js";
 
 const ACCENTS = ["purple", "lilac", "rose", "blue", "mint", "gold"];
 const PRESETS = ["SF", "★", "◈", "✦", "◉", "✧", "◆", "✺"];
@@ -32,6 +34,7 @@ export default function ProfilePanel({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const recoveryCooldown = useEmailCooldown("recovery");
 
   useEffect(() => {
     setDisplayName(profile?.display_name || "");
@@ -57,14 +60,26 @@ export default function ProfilePanel({
   );
 
   async function requestPasswordRecovery() {
+    if (recoveryCooldown.active) return;
     setBusy(true);
     setError("");
     setMessage("");
     try {
       await sendPasswordRecovery(supabase.auth, user.email, getRecoveryRedirectUrl(window.location.origin));
-      setMessage("A password reset link was sent to your email.");
+      const next = recoveryCooldown.triggerCooldown();
+      const waitLabel = formatCooldownDuration(next.durationMs);
+      setMessage(
+        next.attempts > 1
+          ? `A password reset link was sent to your email. Repeated request — next link available in ${waitLabel}.`
+          : `A password reset link was sent to your email. Next link available in ${waitLabel}.`
+      );
     } catch (recoveryError) {
-      setError(recoveryError.message || "Unable to send a password recovery link.");
+      if (isEmailRateLimitError(recoveryError)) {
+        const next = recoveryCooldown.triggerCooldown();
+        setError(`Email rate limit reached. Please wait ${formatCooldownDuration(next.durationMs)} before requesting another link.`);
+      } else {
+        setError(normalizeAuthError(recoveryError, "recovery"));
+      }
     } finally {
       setBusy(false);
     }
@@ -178,9 +193,23 @@ export default function ProfilePanel({
             <span className="section-kicker">SECURITY</span>
             <strong>{user.email}</strong>
             <p>Password recovery and security verification are handled through Supabase Auth.</p>
-            <button className="secondary-button" type="button" disabled={busy} onClick={requestPasswordRecovery}>
-              {busy ? "Sending…" : "Send password recovery link"}
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={busy || recoveryCooldown.active}
+              onClick={requestPasswordRecovery}
+            >
+              {busy
+                ? "Sending…"
+                : recoveryCooldown.active
+                  ? `Wait ${recoveryCooldown.formattedRemaining}`
+                  : "Send password recovery link"}
             </button>
+            {recoveryCooldown.active && (
+              <small className="field-hint">
+                Cooldown starts at 10 minutes and increases on repeated requests.
+              </small>
+            )}
             {error && <p className="account-error">{error}</p>}
             {message && <p className="account-message">{message}</p>}
           </div>

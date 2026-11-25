@@ -6,6 +6,8 @@ import {
   normalizeAuthError,
   validateNewPassword
 } from "../auth/authStateMachine.js";
+import { formatCooldownDuration, isEmailRateLimitError } from "../auth/emailCooldown.js";
+import { useEmailCooldown } from "../auth/useEmailCooldown.js";
 
 function PasswordInput({ label, value, onChange, autoComplete, minLength, required = true, disabled = false, hint = "" }) {
   const [visible, setVisible] = useState(false);
@@ -59,7 +61,8 @@ export default function AuthPanel({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [resendCooldown, setResendCooldown] = useState(false);
+  const recoveryCooldown = useEmailCooldown("recovery");
+  const verificationCooldown = useEmailCooldown("verification");
 
   useEffect(() => {
     if (recoveryStatus === AUTH_STATUS.RECOVERY_VALIDATING || recoveryStatus === AUTH_STATUS.RECOVERY_READY || recoveryStatus === AUTH_STATUS.RECOVERY_ERROR) {
@@ -105,7 +108,7 @@ export default function AuthPanel({
   }
 
   async function handleResendVerification() {
-    if (!email.trim() || resendCooldown) return;
+    if (!email.trim() || verificationCooldown.active) return;
     setBusy(true);
     setError("");
     setMessage("");
@@ -116,11 +119,20 @@ export default function AuthPanel({
         options: { emailRedirectTo: window.location.origin }
       });
       if (resendError) throw resendError;
-      setResendCooldown(true);
-      setMessage("If that address is awaiting verification, a new verification email has been sent.");
-      window.setTimeout(() => setResendCooldown(false), 30_000);
+      const next = verificationCooldown.triggerCooldown();
+      const waitLabel = formatCooldownDuration(next.durationMs);
+      setMessage(
+        next.attempts > 1
+          ? `If that address is awaiting verification, a new verification email has been sent. Repeated request — next link available in ${waitLabel}.`
+          : `If that address is awaiting verification, a new verification email has been sent. You can request another in ${waitLabel}.`
+      );
     } catch (resendFailure) {
-      setError(normalizeAuthError(resendFailure, "register"));
+      if (isEmailRateLimitError(resendFailure)) {
+        const next = verificationCooldown.triggerCooldown();
+        setError(`Email rate limit reached. Please wait ${formatCooldownDuration(next.durationMs)} before requesting another verification link.`);
+      } else {
+        setError(normalizeAuthError(resendFailure, "register"));
+      }
     } finally {
       setBusy(false);
     }
@@ -128,6 +140,7 @@ export default function AuthPanel({
 
   async function submit(event) {
     event.preventDefault();
+    if (isRecoveryRequest && recoveryCooldown.active) return;
     setBusy(true);
     setMessage("");
     setError("");
@@ -152,8 +165,14 @@ export default function AuthPanel({
           redirectTo: getRecoveryRedirectUrl(window.location.origin)
         });
         if (requestError) throw requestError;
+        const next = recoveryCooldown.triggerCooldown();
+        const waitLabel = formatCooldownDuration(next.durationMs);
         // Neutral message: never reveal whether an email address is registered.
-        setMessage("If an account exists for that email, a password reset link is on its way. Check your inbox and spam folder.");
+        setMessage(
+          next.attempts > 1
+            ? `If an account exists for that email, a password reset link is on its way. Repeated request — next link available in ${waitLabel}.`
+            : `If an account exists for that email, a password reset link is on its way. Check your inbox and spam folder. Next link available in ${waitLabel}.`
+        );
       } else if (isRegister) {
         const validation = validateNewPassword(password, confirmPassword);
         if (!validation.valid) {
@@ -173,6 +192,7 @@ export default function AuthPanel({
           onClose("authenticated");
           return;
         }
+        verificationCooldown.triggerCooldown();
         setMode("verify-email");
         setPassword("");
         setConfirmPassword("");
@@ -188,7 +208,12 @@ export default function AuthPanel({
       }
     } catch (submitError) {
       const ctx = isReset ? "reset" : isRegister ? "register" : isRecoveryRequest ? "recovery" : "sign-in";
-      setError(normalizeAuthError(submitError, ctx));
+      if (isRecoveryRequest && isEmailRateLimitError(submitError)) {
+        const next = recoveryCooldown.triggerCooldown();
+        setError(`Email rate limit reached. Please wait ${formatCooldownDuration(next.durationMs)} before requesting another reset link.`);
+      } else {
+        setError(normalizeAuthError(submitError, ctx));
+      }
     } finally {
       setBusy(false);
     }
@@ -273,11 +298,20 @@ export default function AuthPanel({
             <button
               type="button"
               className="secondary-button account-submit"
-              disabled={busy || resendCooldown}
+              disabled={busy || verificationCooldown.active}
               onClick={handleResendVerification}
             >
-              {busy ? "Sending…" : resendCooldown ? "Verification email sent" : "Resend verification email"}
+              {busy
+                ? "Sending…"
+                : verificationCooldown.active
+                  ? `Resend available in ${verificationCooldown.formattedRemaining}`
+                  : "Resend verification email"}
             </button>
+            {verificationCooldown.active && (
+              <small className="field-hint">
+                Cooldown starts at 10 minutes and increases on repeated requests.
+              </small>
+            )}
             <button type="button" className="primary-button account-submit" onClick={() => switchMode("sign-in")}>
               Go to sign in
             </button>
@@ -337,17 +371,26 @@ export default function AuthPanel({
             {effectiveError && <p className="account-error" role="alert">{effectiveError}</p>}
             {message && <p className="account-message" role="status">{message}</p>}
 
-            <button className="primary-button account-submit" disabled={isSubmitting} type="submit">
+            <button
+              className="primary-button account-submit"
+              disabled={isSubmitting || (isRecoveryRequest && recoveryCooldown.active)}
+              type="submit"
+            >
               {isSubmitting
                 ? "Please wait…"
                 : isReset
                   ? "Update password"
                   : isRecoveryRequest
-                    ? "Send reset link"
+                    ? (recoveryCooldown.active ? `Wait ${recoveryCooldown.formattedRemaining}` : "Send reset link")
                     : isRegister
                       ? "Create account"
                       : "Sign in"}
             </button>
+            {isRecoveryRequest && recoveryCooldown.active && (
+              <small className="field-hint">
+                Cooldown starts at 10 minutes and increases each time a link is requested repeatedly.
+              </small>
+            )}
 
             {isReset && (
               <button

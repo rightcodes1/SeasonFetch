@@ -155,13 +155,20 @@ export function validateNewPassword(password, confirmPassword) {
 
 export function normalizeAuthError(error, context = "sign-in") {
   const raw = String(error?.message || "").trim();
-  const lower = raw.toLowerCase();
+  const code = String(error?.code || "").trim().toLowerCase();
+  const lower = `${code} ${raw}`.toLowerCase();
 
   if (lower.includes("failed to fetch") || lower.includes("network") || lower.includes("timeout")) {
     return "Network error while contacting the authentication service. Check your connection and try again.";
   }
+  if (lower.includes("over_email_send_rate_limit") || lower.includes("email rate limit")) {
+    return "Too many email link requests. Please wait for the cooldown timer — repeated requests increase the wait time.";
+  }
   if (lower.includes("rate limit") || lower.includes("too many requests") || error?.status === 429) {
-    return "Too many authentication attempts. Please wait a minute before trying again.";
+    if (context === "recovery" || context === "register") {
+      return "Too many email link requests. Please wait for the cooldown timer — repeated requests increase the wait time.";
+    }
+    return "Too many authentication attempts. Please wait before trying again.";
   }
   if (context === "sign-in" && (lower.includes("invalid login credentials") || lower.includes("invalid credentials"))) {
     return "Incorrect email or password. Please check your credentials and try again.";

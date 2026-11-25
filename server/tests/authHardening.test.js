@@ -13,6 +13,17 @@ import {
   scrubAuthUrl,
   validateNewPassword
 } from "../../src/auth/authStateMachine.js";
+import {
+  BASE_COOLDOWN_MS,
+  MAX_COOLDOWN_MS,
+  STREAK_RESET_AFTER_MS,
+  computeCooldownMs,
+  formatCooldownDuration,
+  formatCooldownRemaining,
+  getCooldownState,
+  isEmailRateLimitError,
+  recordCooldownAttempt
+} from "../../src/auth/emailCooldown.js";
 import { createAccountRouter } from "../routes/account.js";
 import { SUPABASE_TIMEOUT_MS, supabaseRequest, supabaseRpc } from "../services/supabaseAuth.js";
 
@@ -246,7 +257,85 @@ test("password validation and non-enumerating auth error normalization", () => {
   assert.match(normalizeAuthError({ message: "Invalid login credentials" }, "sign-in"), /Incorrect email or password/i);
   assert.match(normalizeAuthError({ message: "Email not confirmed" }, "sign-in"), /not been verified/i);
   assert.match(normalizeAuthError({ message: "Failed to fetch" }, "sign-in"), /Network error/i);
-  assert.match(normalizeAuthError({ status: 429, message: "rate limit" }, "recovery"), /Too many authentication attempts/i);
+  assert.match(normalizeAuthError({ status: 429, message: "rate limit" }, "sign-in"), /Too many authentication attempts/i);
+  assert.match(normalizeAuthError({ status: 429, code: "over_email_send_rate_limit", message: "email rate limit exceeded" }, "recovery"), /Too many email link requests/i);
+  assert.match(normalizeAuthError({ status: 429, message: "rate limit" }, "recovery"), /cooldown timer/i);
+});
+
+test("email link cooldown starts at 10 minutes, escalates on each repetitive attempt, caps at 24h, and resets after quiet period", () => {
+  const store = new Map();
+  const storage = {
+    getItem: key => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => { store.set(key, String(value)); },
+    removeItem: key => { store.delete(key); }
+  };
+
+  const t0 = 1_700_000_000_000;
+  assert.equal(BASE_COOLDOWN_MS, 10 * 60 * 1000);
+
+  // Initial state: inactive, ready to send
+  const initial = getCooldownState("recovery", { storage, now: t0 });
+  assert.equal(initial.active, false);
+  assert.equal(initial.attempts, 0);
+  assert.equal(initial.remainingMs, 0);
+
+  // Attempt 1: 10 minutes
+  const a1 = recordCooldownAttempt("recovery", { storage, now: t0 });
+  assert.equal(a1.active, true);
+  assert.equal(a1.attempts, 1);
+  assert.equal(a1.durationMs, 10 * 60 * 1000);
+  assert.equal(a1.nextDurationMs, 20 * 60 * 1000);
+
+  // Mid-cooldown check persists from storage
+  const mid1 = getCooldownState("recovery", { storage, now: t0 + 3 * 60 * 1000 });
+  assert.equal(mid1.active, true);
+  assert.equal(mid1.remainingMs, 7 * 60 * 1000);
+
+  // Verification bucket stays independent of recovery bucket
+  assert.equal(getCooldownState("verification", { storage, now: t0 }).active, false);
+
+  // Attempt 2 right after 10m expires: escalates to 20 minutes
+  const t2 = t0 + 10 * 60 * 1000 + 1000;
+  assert.equal(getCooldownState("recovery", { storage, now: t2 }).active, false);
+  const a2 = recordCooldownAttempt("recovery", { storage, now: t2 });
+  assert.equal(a2.attempts, 2);
+  assert.equal(a2.durationMs, 20 * 60 * 1000);
+
+  // Attempt 3: 40 minutes
+  const t3 = t2 + 20 * 60 * 1000 + 1000;
+  const a3 = recordCooldownAttempt("recovery", { storage, now: t3 });
+  assert.equal(a3.attempts, 3);
+  assert.equal(a3.durationMs, 40 * 60 * 1000);
+
+  // Attempt 4: 80 minutes (1 hour 20 minutes)
+  const t4 = t3 + 40 * 60 * 1000 + 1000;
+  const a4 = recordCooldownAttempt("recovery", { storage, now: t4 });
+  assert.equal(a4.attempts, 4);
+  assert.equal(a4.durationMs, 80 * 60 * 1000);
+
+  // High repetitive attempts keep increasing up to the 24-hour cap
+  assert.equal(computeCooldownMs(5), 160 * 60 * 1000);
+  assert.equal(computeCooldownMs(10), MAX_COOLDOWN_MS);
+
+  // After 24h quiet period past expiration, streak resets back to 10 minutes
+  const afterQuiet = a4.nextAllowedAt + STREAK_RESET_AFTER_MS + 1000;
+  const resetState = getCooldownState("recovery", { storage, now: afterQuiet });
+  assert.equal(resetState.active, false);
+  assert.equal(resetState.attempts, 0);
+  const fresh = recordCooldownAttempt("recovery", { storage, now: afterQuiet });
+  assert.equal(fresh.attempts, 1);
+  assert.equal(fresh.durationMs, 10 * 60 * 1000);
+
+  // Formatting & error detection helpers
+  assert.equal(formatCooldownRemaining(10 * 60 * 1000), "10m 00s");
+  assert.equal(formatCooldownRemaining(65_000), "1m 05s");
+  assert.equal(formatCooldownRemaining(45_000), "45s");
+  assert.equal(formatCooldownRemaining(80 * 60 * 1000), "1h 20m 00s");
+  assert.equal(formatCooldownDuration(10 * 60 * 1000), "10 minutes");
+  assert.equal(formatCooldownDuration(80 * 60 * 1000), "1 hour 20 minutes");
+  assert.equal(isEmailRateLimitError({ status: 429 }), true);
+  assert.equal(isEmailRateLimitError({ code: "over_email_send_rate_limit" }), true);
+  assert.equal(isEmailRateLimitError({ message: "Invalid login credentials" }), false);
 });
 
 test("GET /api/account/session verifies JWT, detects suspension, returns admin/profile, and fails closed on outage", async t => {
