@@ -425,3 +425,32 @@ test("supabaseAuth configures 15s AbortSignal timeout, disables redirects, and u
   assert.match(controllerSrc, /subscriptionRef\.current\.unsubscribe\(\)/);
   assert.match(controllerSrc, /subscriptionRef\.current = null/);
 });
+
+test("migration 0007 revokes anon/client execute on security functions, hardens grants, and indexes foreign keys", async () => {
+  const sql = await readFile(new URL("../../supabase/migrations/0007_security_and_index_hardening.sql", import.meta.url), "utf8");
+
+  // Trigger functions must not be callable by public, anon, or authenticated
+  assert.match(sql, /revoke all on function public\.handle_new_user\(\) from public, anon, authenticated/i);
+  assert.match(sql, /revoke all on function public\.handle_new_admin_user\(\) from public, anon, authenticated/i);
+
+  // Anon must not execute is_account_active, is_admin, or admin_set_user_suspension
+  assert.match(sql, /revoke all on function public\.is_account_active\(\) from public, anon/i);
+  assert.match(sql, /revoke all on function public\.is_admin\(\) from public, anon/i);
+  assert.match(sql, /revoke all on function public\.admin_set_user_suspension\(uuid, boolean, text\) from public, anon/i);
+
+  // is_admin is SECURITY INVOKER with pinned search_path
+  assert.match(sql, /create or replace function public\.is_admin\(\)[\s\S]*?security invoker[\s\S]*?set search_path = public, pg_temp/i);
+
+  // Anon profile policy split cleanly from authenticated policy
+  assert.match(sql, /create policy "Anon can read public profiles"[\s\S]*?on public\.profiles for select[\s\S]*?to anon[\s\S]*?using \(is_public = true\)/i);
+
+  // Least-privilege anon revocations on internal tables
+  assert.match(sql, /revoke all on public\.account_suspensions from anon/i);
+  assert.match(sql, /revoke all on public\.admin_roles from anon/i);
+  assert.match(sql, /revoke all on public\.audit_logs from anon/i);
+
+  // Covering indexes for foreign keys
+  assert.match(sql, /idx_account_suspensions_suspended_by/i);
+  assert.match(sql, /idx_audit_logs_actor_id/i);
+  assert.match(sql, /idx_audit_logs_target_user_id/i);
+});
