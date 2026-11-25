@@ -641,3 +641,44 @@ test("LRU bounds enforce maxEntries, media-type isolation filters cross-type cat
   assert.equal(stats.sizes.catalog, CINEMETA_CACHE_CONFIG.catalog.maxEntries);
   assert.equal(stats.sizes.search, CINEMETA_CACHE_CONFIG.search.maxEntries);
 });
+
+test("catalog releaseInfo and released timestamps populate year in autocomplete and survive null-year hydration", async t => {
+  mockUpstreamFetch(t, async url => {
+    const path = new URL(url).pathname;
+    if (path === "/catalog/movie/top/search=dune.json") {
+      return Response.json({
+        metas: [
+          { id: "tt1160419", type: "movie", name: "Dune", releaseInfo: "2021", poster: "https://img/d21.jpg" },
+          { id: "tt0087182", type: "movie", name: "Dune", released: "1984-12-14T00:00:00.000Z", poster: "https://img/d84.jpg" }
+        ]
+      });
+    }
+    if (path === "/meta/movie/tt1160419.json") {
+      // Meta omits year/releaseInfo; hydration must preserve catalog releaseInfo year
+      return Response.json({
+        meta: { id: "tt1160419", type: "movie", name: "Dune", imdbRating: "8.0" }
+      });
+    }
+    if (path === "/meta/movie/tt0087182.json") {
+      return Response.json({
+        meta: { id: "tt0087182", type: "movie", name: "Dune", year: "1984", imdbRating: "6.3" }
+      });
+    }
+    return Response.json({ metas: [] });
+  });
+
+  // Autocomplete (0 hydration calls) populates years immediately from releaseInfo & released
+  const auto = await searchCinemetaWithResolution("Dune", "movie", { mode: "autocomplete" });
+  assert.equal(auto.resolution.hydratedCount, 0);
+  assert.equal(auto.results[0].year, "2021");
+  assert.equal(auto.results[1].year, "1984");
+  assertExactPublicShape(auto.results[0]);
+
+  // Full search hydration preserves catalog releaseInfo year even when meta omits year
+  const full = await searchCinemetaWithResolution("Dune 2021", "movie", { mode: "full" });
+  assert.equal(full.results[0].imdbId, "tt1160419");
+  assert.equal(full.results[0].year, "2021");
+  assert.equal(full.results[0].rating, "8.0");
+  assert.equal(full.resolution.confidence, "high");
+  assert.equal(full.resolution.selectedCandidateId, "tt1160419");
+});

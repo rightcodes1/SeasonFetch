@@ -163,6 +163,20 @@ async function requestJson(url) {
   return response.json();
 }
 
+function extractCandidateYearDisplay(item = {}) {
+  for (const raw of [item.year, item.releaseInfo]) {
+    if (raw !== undefined && raw !== null) {
+      const str = String(raw).trim();
+      if (str) return str;
+    }
+  }
+  if (typeof item.released === "string") {
+    const match = item.released.match(/\b(19\d{2}|20\d{2})\b/);
+    if (match) return match[1];
+  }
+  return null;
+}
+
 function normalizeMetadata(item = {}, mediaType = "series") {
   const genres = Array.isArray(item.genres) ? item.genres.filter(g => typeof g === "string") : [];
 
@@ -170,7 +184,7 @@ function normalizeMetadata(item = {}, mediaType = "series") {
     id: item.id,
     imdbId: item.id,
     title: item.name || "Unknown title",
-    year: item.year || null,
+    year: extractCandidateYearDisplay(item),
     rating: item.imdbRating || item.rating || null,
     // `type` has historically been the genre/display label in this API.
     type: genres.slice(0, 2).join(" · ") || (mediaType === "movie" ? "Movie" : "Series"),
@@ -368,6 +382,9 @@ async function hydrateCandidate(scoringCandidate, mediaType, now) {
       ...hydratedScoring,
       id: scoringCandidate.imdbId,
       imdbId: scoringCandidate.imdbId,
+      year: hydratedScoring.year || scoringCandidate.year || null,
+      rating: hydratedScoring.rating || scoringCandidate.rating || null,
+      poster: hydratedScoring.poster || scoringCandidate.poster || null,
       mediaType
     };
     if (mergedAlts.length) {
