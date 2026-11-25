@@ -4,7 +4,7 @@ import express from "express";
 import helmet from "helmet";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { searchCinemeta, getSeries, getMovie } from "./services/cinemeta.js";
+import { searchCinemetaWithResolution, getSeries, getMovie } from "./services/cinemeta.js";
 import { getSeasonSources, getMovieSources } from "./services/torrentio.js";
 import { explainSourceCandidates, geminiStatus, suggestSearchQueries } from "./services/gemini.js";
 import { requireUser, supabaseRequest, supabaseRpc } from "./services/supabaseAuth.js";
@@ -164,9 +164,14 @@ app.get("/api/cinemeta/search", async (req, res) => {
   if (!["movie", "series"].includes(mediaType)) {
     return res.status(400).json({ error: "Media type must be movie or series." });
   }
+  const mode = req.query.mode === undefined ? "full" : req.query.mode;
+  if (!["full", "autocomplete"].includes(mode)) {
+    return res.status(400).json({ error: "Search mode must be full or autocomplete." });
+  }
   try {
     res.setHeader("Cache-Control", "public, s-maxage=600, stale-while-revalidate=1800");
-    return res.json({ results: await searchCinemeta(req.query.q, mediaType) });
+    const payload = await searchCinemetaWithResolution(req.query.q, mediaType, { mode });
+    return res.json(payload);
   } catch (error) {
     console.error("Cinemeta search failed:", error.message);
     return res.status(502).json({ error: "Cinemeta search is unavailable right now." });

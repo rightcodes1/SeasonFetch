@@ -15,7 +15,16 @@ import { parseSectionFromPath, pushSectionPath } from './utils/navigation.js';
 import { getEpisodeReleaseFields, getReleaseIdentity, restoreEpisodeRecommendation, selectEpisodeRelease } from './utils/releaseSelection.js';
 import { copyTextToClipboard } from './utils/clipboard.js';
 import { createScanCoordinator } from './utils/scanCoordinator.js';
-import { createSearchCoordinator } from './utils/searchCoordinator.js';
+import { createSearchCoordinator, isAbortError } from './utils/searchCoordinator.js';
+import {
+  buildSearchCacheKey,
+  createAutocompleteCache,
+  filterResultsByMediaType,
+  getMediaTypeFallbackLabel,
+  normalizeSearchQueryText,
+  normalizeSearchResolution,
+  resolveChangeSelectionAction
+} from './utils/searchSession.js';
 import { toGeminiCandidate } from './utils/geminiCandidates.js';
 import { normalizeRankingPreference, rankingPreferenceDescription, rankingPreferenceHint, RANKING_PREFERENCES } from '../shared/rankingPreferences.js';
 import { getNoSourceCopy, getResolutionPreferenceLabel, getResolutionSummaryCopy, RESOLUTION_PREFERENCES } from './utils/resolutionDisplay.js';
@@ -224,14 +233,18 @@ function App() {
   const [geminiLoading, setGeminiLoading] = useState({});
   const [searchSuggestions, setSearchSuggestions] = useState([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [searchResolution, setSearchResolution] = useState(null);
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState('sign-in');
   const [showAdmin, setShowAdmin] = useState(false);
-  const suggestionRequestRef = useRef(0);
-  const suggestionTimerRef = useRef(null);
   const metadataRequestRef = useRef(0);
   const searchCoordinatorRef = useRef(null);
   if (!searchCoordinatorRef.current) searchCoordinatorRef.current = createSearchCoordinator();
+  const suggestionCoordinatorRef = useRef(null);
+  if (!suggestionCoordinatorRef.current) suggestionCoordinatorRef.current = createSearchCoordinator();
+  const autocompleteCacheRef = useRef(null);
+  if (!autocompleteCacheRef.current) autocompleteCacheRef.current = createAutocompleteCache();
+  const lastSearchRef = useRef(null);
   const scanCoordinatorRef = useRef(null);
   if (!scanCoordinatorRef.current) scanCoordinatorRef.current = createScanCoordinator({ onCheckingChange: setChecking });
   const [torrentioPreference, setTorrentioPreference] = useState(() => {
@@ -341,11 +354,7 @@ function App() {
   }
 
   function invalidateSuggestions() {
-    suggestionRequestRef.current += 1;
-    if (suggestionTimerRef.current !== null) {
-      window.clearTimeout(suggestionTimerRef.current);
-      suggestionTimerRef.current = null;
-    }
+    suggestionCoordinatorRef.current.invalidate();
     setSuggestionsLoading(false);
   }
 
@@ -361,6 +370,8 @@ function App() {
   }
 
   useEffect(() => () => {
+    searchCoordinatorRef.current?.invalidate();
+    suggestionCoordinatorRef.current?.invalidate();
     scanCoordinatorRef.current?.invalidate();
     if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
   }, []);
@@ -370,131 +381,177 @@ function App() {
     await auth.signOut();
   }
 
-  function decorateResults(items) {
+  function decorateResults(items, mediaType = searchMode) {
     return items.map((item, index) => {
-      const local = SERIES.find(candidate => candidate.imdbId === item.imdbId);
+      const itemMediaType = item.mediaType || mediaType;
+      const local = itemMediaType === 'series'
+        ? SERIES.find(candidate => candidate.imdbId === item.imdbId)
+        : null;
       const title = item.title || local?.title || 'Unknown title';
       return {
-        ...local,
+        ...(local || {}),
         ...item,
         id: item.id,
         imdbId: item.imdbId || item.id,
+        mediaType: itemMediaType,
         title,
         accent: local?.accent || ['purple', 'orange', 'blue', 'red'][index % 4],
         initials: local?.initials || title.split(/\s+/).slice(0, 2).map(word => word[0]).join('').toUpperCase(),
         posterLabel: local?.posterLabel || 'Cinemeta metadata',
-        episodes: local?.episodes || {}
+        ...(itemMediaType === 'series' ? { episodes: local?.episodes || {} } : {})
       };
     });
   }
 
   useEffect(() => {
-    const cleanQuery = query.trim();
+    const cleanQuery = normalizeSearchQueryText(query);
     if (cleanQuery.length < 2) {
+      suggestionCoordinatorRef.current.invalidate();
       setSearchSuggestions([]);
       setSuggestionsLoading(false);
-      if (suggestionTimerRef.current !== null) {
-        window.clearTimeout(suggestionTimerRef.current);
-        suggestionTimerRef.current = null;
-      }
       return undefined;
     }
 
-    let active = true;
-    const requestId = ++suggestionRequestRef.current;
+    const activeMode = searchMode;
     setSuggestionsLoading(true);
-    const timer = window.setTimeout(async () => {
-      suggestionTimerRef.current = null;
+    suggestionCoordinatorRef.current.schedule(async requestId => {
+      const signal = suggestionCoordinatorRef.current.getSignal(requestId);
       try {
-        const data = await cinemeta.search(cleanQuery, searchMode === 'movie' ? 'movie' : undefined);
-        if (active && requestId === suggestionRequestRef.current) {
-          const matches = decorateResults(data.results || []).filter(item => searchMode !== 'movie' || item.mediaType === 'movie');
-          setSearchSuggestions(matches.slice(0, 5));
-        }
-      } catch {
-        if (active && requestId === suggestionRequestRef.current) setSearchSuggestions([]);
+        const data = await cinemeta.search(
+          cleanQuery,
+          activeMode === 'movie' ? 'movie' : undefined,
+          { mode: 'autocomplete', signal }
+        );
+        if (!suggestionCoordinatorRef.current.isCurrent(requestId)) return;
+        autocompleteCacheRef.current.set(cleanQuery, activeMode, data);
+        const scoped = filterResultsByMediaType(data.results || [], activeMode);
+        const matches = decorateResults(scoped, activeMode);
+        setSearchSuggestions(matches.slice(0, 5));
+      } catch (error) {
+        if (isAbortError(error) || !suggestionCoordinatorRef.current.isCurrent(requestId)) return;
+        setSearchSuggestions([]);
       } finally {
-        if (active && requestId === suggestionRequestRef.current) setSuggestionsLoading(false);
+        if (suggestionCoordinatorRef.current.isCurrent(requestId)) setSuggestionsLoading(false);
       }
     }, 280);
-    suggestionTimerRef.current = timer;
 
     return () => {
-      active = false;
-      window.clearTimeout(timer);
-      if (suggestionTimerRef.current === timer) suggestionTimerRef.current = null;
+      suggestionCoordinatorRef.current.invalidate();
     };
   }, [query, searchMode]);
 
-  async function searchWithGeminiAssist(cleanQuery, mediaType) {
+  async function searchWithGeminiAssist(cleanQuery, mediaType, { signal } = {}) {
     const response = await fetch('/api/gemini/search-assist', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query: cleanQuery })
+      body: JSON.stringify({ query: cleanQuery }),
+      ...(signal ? { signal } : {})
     });
     if (!response.ok) throw new Error('Gemini search assist failed');
     const data = await response.json();
     for (const suggestion of data.queries || []) {
-      const candidateData = await cinemeta.search(suggestion, mediaType === 'movie' ? 'movie' : undefined);
-      const candidateResults = decorateResults(candidateData.results || []).filter(item => mediaType !== 'movie' || item.mediaType === 'movie');
+      const candidateData = await cinemeta.search(
+        suggestion,
+        mediaType === 'movie' ? 'movie' : undefined,
+        { mode: 'full', signal }
+      );
+      const scoped = filterResultsByMediaType(candidateData.results || [], mediaType);
+      const candidateResults = decorateResults(scoped, mediaType);
       if (candidateResults.length) return { results: candidateResults, correctedQuery: suggestion };
     }
     return { results: [], correctedQuery: '' };
   }
 
-  function runSearch(event, overrideQuery) {
+  function runSearch(event, overrideQuery, overrideMode) {
     event?.preventDefault();
     invalidateScan();
     invalidateSearch();
     invalidateSuggestions();
-    const cleanQuery = String(overrideQuery ?? query).trim().toLowerCase();
+    const activeMode = overrideMode === 'movie' || overrideMode === 'series' ? overrideMode : searchMode;
+    const cleanQuery = normalizeSearchQueryText(overrideQuery ?? query);
     setSearchTouched(true);
-    setSearching(true);
     setNotice(null);
     setSearchSuggestions([]);
+    setSearchResolution(null);
     metadataRequestRef.current += 1;
     setSelected(null);
     setEpisodes([]);
     setMovieRelease(null);
     setMovieMetadataLoading(false);
+    setMovieMetadataError('');
     setExpanded({});
-    searchCoordinatorRef.current.schedule(async requestId => {
-      if (cleanQuery.length < 2) {
-        if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
-        setResults([]);
-        setSearching(false);
-        setNotice('Enter at least two characters to search.');
-        return;
-      }
 
+    if (cleanQuery.length < 2) {
+      setResults([]);
+      setSearching(false);
+      setNotice('Enter at least two characters to search.');
+      return;
+    }
+
+    const reusable = autocompleteCacheRef.current.getReusable(cleanQuery, activeMode);
+    if (reusable) {
+      const nextResults = decorateResults(reusable.results, activeMode);
+      lastSearchRef.current = {
+        key: buildSearchCacheKey(cleanQuery, activeMode),
+        mediaType: activeMode,
+        results: nextResults,
+        resolution: reusable.resolution
+      };
+      setResults(nextResults);
+      setSearchResolution(reusable.resolution);
+      setSearchSuggestions(nextResults.slice(0, 5));
+      setSearching(false);
+      return;
+    }
+
+    setSearching(true);
+    searchCoordinatorRef.current.schedule(async requestId => {
+      const signal = searchCoordinatorRef.current.getSignal(requestId);
       try {
-        const data = await cinemeta.search(cleanQuery, searchMode === 'movie' ? 'movie' : undefined);
+        const data = await cinemeta.search(
+          cleanQuery,
+          activeMode === 'movie' ? 'movie' : undefined,
+          { mode: 'full', signal }
+        );
         if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
-        let nextResults = decorateResults(data.results || []).filter(item => searchMode !== 'movie' || item.mediaType === 'movie');
+        const nextResolution = normalizeSearchResolution(data?.resolution);
+        const scoped = filterResultsByMediaType(data.results || [], activeMode);
+        let nextResults = decorateResults(scoped, activeMode);
         let correctedQuery = '';
         if (!nextResults.length) {
           try {
-            const assisted = await searchWithGeminiAssist(cleanQuery, searchMode);
+            const assisted = await searchWithGeminiAssist(cleanQuery, activeMode, { signal });
             if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
             nextResults = assisted.results;
             correctedQuery = assisted.correctedQuery;
           } catch (assistError) {
+            if (isAbortError(assistError) || !searchCoordinatorRef.current.isCurrent(requestId)) return;
             console.warn('Gemini search assist failed:', assistError);
           }
         }
         if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
+        const effectiveResolution = correctedQuery ? null : nextResolution;
+        lastSearchRef.current = {
+          key: buildSearchCacheKey(cleanQuery, activeMode),
+          mediaType: activeMode,
+          results: nextResults,
+          resolution: effectiveResolution
+        };
         setResults(nextResults);
+        setSearchResolution(effectiveResolution);
         setSearchSuggestions(nextResults.slice(0, 5));
         setSearching(false);
         if (correctedQuery) setNotice(`Gemini search assist matched “${correctedQuery}”.`);
-        else if (!nextResults.length) setNotice(searchMode === 'movie' ? 'No movies found. Try another title.' : 'No series found. Try another title.');
+        else if (!nextResults.length) setNotice(activeMode === 'movie' ? 'No movies found. Try another title.' : 'No series found. Try another title.');
       } catch (error) {
-        if (!searchCoordinatorRef.current.isCurrent(requestId)) return;
+        if (isAbortError(error) || !searchCoordinatorRef.current.isCurrent(requestId)) return;
         console.warn('Cinemeta search failed; using local preview matches.', error);
-        const fallback = searchMode === 'series' ? SERIES.filter(item => `${item.title} ${item.type}`.toLowerCase().includes(cleanQuery)) : [];
+        const loweredQuery = cleanQuery.toLowerCase();
+        const fallback = activeMode === 'series' ? SERIES.filter(item => `${item.title} ${item.type}`.toLowerCase().includes(loweredQuery)) : [];
         setResults(fallback);
+        setSearchResolution(null);
         setSearching(false);
-        setNotice(fallback.length ? 'Cinemeta is unavailable; showing local preview matches.' : searchMode === 'movie' ? 'Movie search is unavailable right now. Please try again later.' : 'No series found. Try another title.');
+        setNotice(fallback.length ? 'Cinemeta is unavailable; showing local preview matches.' : activeMode === 'movie' ? 'Movie search is unavailable right now. Please try again later.' : 'No series found. Try another title.');
       }
     }, 320);
   }
@@ -956,18 +1013,54 @@ function App() {
     }
   }
 
+  function handleChangeSelection() {
+    invalidateScan();
+    invalidateSearch();
+    invalidateSuggestions();
+    metadataRequestRef.current += 1;
+    const plan = resolveChangeSelectionAction({
+      selectedMediaType: selected?.mediaType,
+      query,
+      lastSearch: lastSearchRef.current
+    });
+    setSearchMode(plan.mediaType);
+    setSelected(null);
+    setEpisodes([]);
+    setMovieRelease(null);
+    setMovieMetadataLoading(false);
+    setMovieMetadataError('');
+    setExpanded({});
+    setNotice(null);
+
+    if (plan.action === 'restore-results') {
+      setResults(plan.results);
+      setSearchResolution(plan.resolution);
+      return;
+    }
+    if (plan.action === 'run-search') {
+      runSearch(undefined, plan.query, plan.mediaType);
+      return;
+    }
+    setResults([]);
+    setSearchResolution(null);
+    setSearchTouched(false);
+  }
+
   function reset() {
     invalidateSearch();
     invalidateSuggestions();
     invalidateScan();
     metadataRequestRef.current += 1;
+    lastSearchRef.current = null;
     navigateToSection('discover');
     setQuery('');
     setResults([]);
+    setSearchResolution(null);
     setSelected(null);
     setEpisodes([]);
     setMovieRelease(null);
     setMovieMetadataLoading(false);
+    setMovieMetadataError('');
     setNotice(null);
     setExpanded({});
     setSearchSuggestions([]);
@@ -1075,22 +1168,22 @@ function App() {
           <h1>{searchMode === 'movie' ? <>Find your movie.<br /><span>Save &amp; compare releases.</span></> : <>Find your next watch.<br /><span>Save it to your library.</span></>}</h1>
           <p className="hero-copy">{searchMode === 'movie' ? 'Discover films, build your watchlist, and compare available releases in one place.' : <>Discover TV series, save favorites to your personal library, and inspect episode sources.<br className="desktop-only" /></>} {rankingPreferenceDescription(torrentioPreference)}</p>
           <div className="search-mode" role="group" aria-label="Search type">
-            <button type="button" aria-pressed={searchMode === 'series'} onClick={() => { if (searchMode === 'series') return; invalidateSearch(); invalidateSuggestions(); invalidateScan(); metadataRequestRef.current += 1; setSearchMode('series'); setSelected(null); setResults([]); setEpisodes([]); setMovieRelease(null); setMovieMetadataLoading(false); setNotice(null); setSearchTouched(false); }}>Series</button>
-            <button type="button" aria-pressed={searchMode === 'movie'} onClick={() => { if (searchMode === 'movie') return; invalidateSearch(); invalidateSuggestions(); invalidateScan(); metadataRequestRef.current += 1; setSearchMode('movie'); setSelected(null); setResults([]); setEpisodes([]); setMovieRelease(null); setMovieMetadataLoading(false); setNotice(null); setSearchTouched(false); }}>Movies</button>
+            <button type="button" aria-pressed={searchMode === 'series'} onClick={() => { if (searchMode === 'series') return; invalidateSearch(); invalidateSuggestions(); invalidateScan(); metadataRequestRef.current += 1; lastSearchRef.current = null; setSearchMode('series'); setSelected(null); setResults([]); setSearchResolution(null); setSearchSuggestions([]); setEpisodes([]); setMovieRelease(null); setMovieMetadataLoading(false); setMovieMetadataError(''); setNotice(null); setSearchTouched(false); }}>Series</button>
+            <button type="button" aria-pressed={searchMode === 'movie'} onClick={() => { if (searchMode === 'movie') return; invalidateSearch(); invalidateSuggestions(); invalidateScan(); metadataRequestRef.current += 1; lastSearchRef.current = null; setSearchMode('movie'); setSelected(null); setResults([]); setSearchResolution(null); setSearchSuggestions([]); setEpisodes([]); setMovieRelease(null); setMovieMetadataLoading(false); setMovieMetadataError(''); setNotice(null); setSearchTouched(false); }}>Movies</button>
           </div>
           <form className="search-form" onSubmit={runSearch}>
             <Icon name="search" size={18} />
             <input value={query} onChange={event => { invalidateSearch(); setQuery(event.target.value); setSearchTouched(false); }} placeholder={searchMode === 'movie' ? 'Search a movie...' : 'Search a TV series...'} aria-label={searchMode === 'movie' ? 'Search movies' : 'Search a TV series'} />
-            {query && <button className="clear-search" type="button" onClick={() => { invalidateSearch(); setQuery(''); }} aria-label="Clear search"><Icon name="x" size={15} /></button>}
+            {query && <button className="clear-search" type="button" onClick={() => { invalidateSearch(); invalidateSuggestions(); setQuery(''); setSearchSuggestions([]); setSearchResolution(null); }} aria-label="Clear search"><Icon name="x" size={15} /></button>}
             <button className="search-button" disabled={searching} type="submit">
               {searching ? <span className="spinner" /> : <>Search <Icon name="arrow" size={15} /></>}
             </button>
           </form>
-          {(suggestionsLoading || searchSuggestions.length > 0) && query.trim().length >= 2 && <div className="search-suggestions" aria-label="Search suggestions">
-            {suggestionsLoading && <div className="suggestions-loading"><span className="spinner spinner-dark" /> Finding matching titles…</div>}
-            {!suggestionsLoading && searchSuggestions.map(series => <button className="suggestion-card" key={series.imdbId || series.id} type="button" onClick={() => { setSearchSuggestions([]); searchMode === 'movie' ? chooseMovie(series) : chooseSeries(series); }}>
-              <Poster series={series} />
-              <span className="suggestion-card-copy"><strong>{series.title}</strong><span>{series.year || 'Year unavailable'} <i /> {series.type || 'Series'}</span></span>
+          {(suggestionsLoading || searchSuggestions.length > 0) && query.trim().length >= 2 && <div className="search-suggestions" aria-label={searchMode === 'movie' ? 'Movie search suggestions' : 'Series search suggestions'}>
+            {suggestionsLoading && <div className="suggestions-loading"><span className="spinner spinner-dark" /> {searchMode === 'movie' ? 'Finding matching movies…' : 'Finding matching series…'}</div>}
+            {!suggestionsLoading && searchSuggestions.map(item => <button className="suggestion-card" key={item.imdbId || item.id} type="button" onClick={() => { setSearchSuggestions([]); (item.mediaType === 'movie' || searchMode === 'movie') ? chooseMovie(item) : chooseSeries(item); }}>
+              <Poster series={item} />
+              <span className="suggestion-card-copy"><strong>{item.title}</strong><span>{item.year || 'Year unavailable'} <i /> {item.type || getMediaTypeFallbackLabel(item, searchMode)}</span></span>
               <span className="card-arrow"><Icon name="arrow" size={14} /></span>
             </button>)}
           </div>}
@@ -1102,21 +1195,21 @@ function App() {
         {searching && <div className="loading-panel"><span className="spinner spinner-dark" /> Searching Cinemeta catalog <span className="loading-note">this usually takes a moment</span></div>}
 
         {!searching && results.length > 0 && (
-          <section className="results-section fade-in">
+          <section className="results-section fade-in" data-resolution-mode={searchResolution?.mode || undefined}>
             <div className="section-heading"><div><span className="section-kicker">SEARCH RESULTS</span><h2>{searchMode === 'movie' ? 'Matching movies' : 'Matching series'}</h2></div><span className="result-count">{results.length} matches</span></div>
             <div className="series-grid">
-              {results.map(series => <div key={series.id} className="series-card-wrap">
-                <button className="series-card" onClick={() => searchMode === 'movie' ? chooseMovie(series) : chooseSeries(series)}>
-                  <Poster series={series} />
-                  <span className="series-card-copy"><strong>{series.title}</strong><span>{series.year || 'Year unavailable'} <i /> {series.type || 'Series'}</span><em><Icon name="bolt" size={11} /> {series.rating || 'Rating unavailable'}</em></span>
+              {results.map(item => <div key={item.id} className="series-card-wrap">
+                <button className="series-card" onClick={() => (item.mediaType === 'movie' || searchMode === 'movie') ? chooseMovie(item) : chooseSeries(item)}>
+                  <Poster series={item} />
+                  <span className="series-card-copy"><strong>{item.title}</strong><span>{item.year || 'Year unavailable'} <i /> {item.type || getMediaTypeFallbackLabel(item, searchMode)}</span><em><Icon name="bolt" size={11} /> {item.rating || 'Rating unavailable'}</em></span>
                   <span className="card-arrow"><Icon name="arrow" size={15} /></span>
                 </button>
                 <SaveToLibraryControl
                   variant="card"
-                  media={series}
+                  media={item}
                   fallbackMediaType={searchMode}
-                  savedItem={library.getSavedItem(series, searchMode)}
-                  busy={library.isItemBusy(series, searchMode)}
+                  savedItem={library.getSavedItem(item, searchMode)}
+                  busy={library.isItemBusy(item, searchMode)}
                   onSave={library.saveItem}
                   onUpdateStatus={library.updateStatus}
                   onToggleFavorite={library.toggleFavorite}
@@ -1159,7 +1252,7 @@ function App() {
                   onRemove={library.removeItem}
                 />
               </div>
-              <button className="change-button" onClick={() => { invalidateScan(); metadataRequestRef.current += 1; setSelected(null); setEpisodes([]); setMovieRelease(null); if (selected.mediaType === 'movie') runSearch(undefined, query); else setResults(SERIES); }}>{selected.mediaType === 'movie' ? 'Change movie' : 'Change series'} <Icon name="arrow" size={14} /></button>
+              <button className="change-button" onClick={handleChangeSelection}>{selected.mediaType === 'movie' ? 'Change movie' : 'Change series'} <Icon name="arrow" size={14} /></button>
             </div>
 
             {selected.mediaType !== 'movie' ? <>
