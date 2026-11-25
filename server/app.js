@@ -8,6 +8,7 @@ import { searchCinemeta, getSeries, getMovie } from "./services/cinemeta.js";
 import { getSeasonSources, getMovieSources } from "./services/torrentio.js";
 import { explainSourceCandidates, geminiStatus, suggestSearchQueries } from "./services/gemini.js";
 import { requireUser, supabaseRequest, supabaseRpc } from "./services/supabaseAuth.js";
+import { createAccountRouter } from "./routes/account.js";
 import { createLibraryRouter } from "./routes/library.js";
 import { normalizeRankingPreference } from "../shared/rankingPreferences.js";
 
@@ -65,6 +66,31 @@ async function requireAdmin(req, res, next) {
     return res.status(403).json({ error: "Administrator access required." });
   }
 }
+
+const adminRateWindow = new Map();
+
+function rateLimitAdmin(req, res, next) {
+  const key = req.ip || req.headers["x-forwarded-for"] || "unknown";
+  const now = Date.now();
+  if (adminRateWindow.size > 2000) {
+    for (const [bucketKey, timestamps] of adminRateWindow) {
+      const fresh = timestamps.filter(ts => now - ts < 60_000);
+      if (fresh.length) adminRateWindow.set(bucketKey, fresh);
+      else adminRateWindow.delete(bucketKey);
+    }
+  }
+  const recent = (adminRateWindow.get(key) || []).filter(timestamp => now - timestamp < 60_000);
+  if (recent.length >= 60) {
+    res.setHeader("Retry-After", "60");
+    return res.status(429).json({ error: "Too many admin requests. Please try again in a minute." });
+  }
+  recent.push(now);
+  adminRateWindow.set(key, recent);
+  return next();
+}
+
+app.use("/api", createAccountRouter());
+app.use("/api/admin", rateLimitAdmin);
 
 app.get("/api/admin/users", requireUser, requireAdmin, async (req, res) => {
   try {

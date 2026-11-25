@@ -9,11 +9,16 @@ export default function AppHeader({
   user,
   supabase,
   profile,
+  profileLoading = false,
+  profileError = "",
+  suspended = false,
+  suspensionReason = "",
   isAdmin,
   libraryCounts,
   onAdmin,
   onSignOut,
   onProfileUpdated,
+  onRetryProfile,
   onSignIn
 }) {
   return (
@@ -52,11 +57,16 @@ export default function AppHeader({
             supabase={supabase}
             user={user}
             profile={profile}
+            profileLoading={profileLoading}
+            profileError={profileError}
+            suspended={suspended}
+            suspensionReason={suspensionReason}
             isAdmin={isAdmin}
             libraryCounts={libraryCounts}
             onAdmin={onAdmin}
             onSignOut={onSignOut}
             onProfileUpdated={onProfileUpdated}
+            onRetryProfile={onRetryProfile}
           />
         ) : (
           <button className="account-trigger account-sign-in" type="button" onClick={onSignIn}>

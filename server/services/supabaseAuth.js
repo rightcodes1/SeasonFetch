@@ -1,12 +1,25 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
+export const SUPABASE_TIMEOUT_MS = 15_000;
+
 let cachedJwksUrl = '';
 let cachedJwks = null;
 
 function getSupabaseConfig() {
-  const rawUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '';
+  const rawUrl = process.env.SUPABASE_URL
+    || process.env.VITE_SUPABASE_URL
+    || process.env.NEXT_PUBLIC_SUPABASE_URL
+    || '';
   const supabaseUrl = String(rawUrl).trim().replace(/\/+$/, '');
-  const supabaseAnonKey = String(process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '').trim();
+  const supabaseAnonKey = String(
+    process.env.SUPABASE_ANON_KEY
+    || process.env.SUPABASE_PUBLISHABLE_KEY
+    || process.env.VITE_SUPABASE_ANON_KEY
+    || process.env.VITE_SUPABASE_PUBLISHABLE_KEY
+    || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+    || ''
+  ).trim();
   return { supabaseUrl, supabaseAnonKey };
 }
 
@@ -45,6 +58,8 @@ export async function supabaseRequest(path, token, options = {}) {
   if (!supabaseUrl || !supabaseAnonKey) throw new Error('Supabase server integration is not configured.');
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
     ...options,
+    redirect: 'error',
+    signal: options.signal || AbortSignal.timeout(SUPABASE_TIMEOUT_MS),
     headers: {
       apikey: supabaseAnonKey,
       Authorization: `Bearer ${token}`,
@@ -68,6 +83,8 @@ export async function supabaseRpc(name, args, token) {
   if (!supabaseUrl || !supabaseAnonKey) throw new Error('Supabase server integration is not configured.');
   const response = await fetch(`${supabaseUrl}/rest/v1/rpc/${name}`, {
     method: 'POST',
+    redirect: 'error',
+    signal: AbortSignal.timeout(SUPABASE_TIMEOUT_MS),
     headers: {
       apikey: supabaseAnonKey,
       Authorization: `Bearer ${token}`,

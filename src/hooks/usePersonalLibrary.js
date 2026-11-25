@@ -15,7 +15,9 @@ import { libraryStatusLabel } from "../../shared/libraryConstants.js";
 export function usePersonalLibrary({
   supabase,
   user,
+  suspended = false,
   onRequireAuth,
+  onSessionExpired,
   onToast,
   onNotice
 }) {
@@ -42,7 +44,7 @@ export function usePersonalLibrary({
 
   const loadLibrary = useCallback(async () => {
     const requestGeneration = ++loadGenerationRef.current;
-    if (!supabase || !user) {
+    if (!supabase || !user || suspended) {
       setItems([]);
       setLoading(false);
       setError("");
@@ -56,16 +58,20 @@ export function usePersonalLibrary({
       setItems(Array.isArray(data.items) ? data.items : []);
     } catch (loadError) {
       if (requestGeneration !== loadGenerationRef.current) return;
+      if (loadError?.status === 401) {
+        onSessionExpired?.();
+        return;
+      }
       setError(loadError.message || "Unable to load your library right now.");
     } finally {
       if (requestGeneration === loadGenerationRef.current) {
         setLoading(false);
       }
     }
-  }, [supabase, user]);
+  }, [supabase, user, suspended, onSessionExpired]);
 
   useEffect(() => {
-    if (!supabase || !user) {
+    if (!supabase || !user || suspended) {
       loadGenerationRef.current += 1;
       setItems([]);
       setLoading(false);
@@ -82,7 +88,7 @@ export function usePersonalLibrary({
       activeDayPingedUserRef.current = user.id;
       libraryApi.pingActiveDay(supabase).catch(() => {});
     }
-  }, [supabase, user, pendingSave, loadLibrary]);
+  }, [supabase, user, suspended, pendingSave, loadLibrary]);
 
   const executeSaveSnapshot = useCallback(async snapshot => {
     const key = libraryItemKey(snapshot.mediaType, snapshot.imdbId);
@@ -101,6 +107,10 @@ export function usePersonalLibrary({
       }
       return result.item || null;
     } catch (saveError) {
+      if (saveError?.status === 401) {
+        onSessionExpired?.();
+        return null;
+      }
       const message = saveError.message || "Unable to save this title right now.";
       setError(message);
       onNotice?.(message);
@@ -108,10 +118,10 @@ export function usePersonalLibrary({
     } finally {
       setKeyBusy(key, false);
     }
-  }, [supabase, setKeyBusy, onToast, onNotice]);
+  }, [supabase, setKeyBusy, onToast, onNotice, onSessionExpired]);
 
   useEffect(() => {
-    if (!user || !supabase || !pendingSave || pendingInFlightRef.current) return;
+    if (!user || suspended || !supabase || !pendingSave || pendingInFlightRef.current) return;
     const intent = pendingSave;
     pendingInFlightRef.current = true;
     setPendingSave(null);
@@ -120,12 +130,16 @@ export function usePersonalLibrary({
       .finally(() => {
         pendingInFlightRef.current = false;
       });
-  }, [user, supabase, pendingSave, executeSaveSnapshot, loadLibrary]);
+  }, [user, suspended, supabase, pendingSave, executeSaveSnapshot, loadLibrary]);
 
   const saveItem = useCallback(async (media, { fallbackMediaType = "series", status = "want_to_watch", isFavorite } = {}) => {
     const snapshot = buildLibrarySnapshot(media, { fallbackMediaType, status, isFavorite });
     if (!snapshot) {
       onNotice?.("This title is missing a valid IMDb ID and cannot be saved to your library.");
+      return null;
+    }
+    if (suspended) {
+      onNotice?.("Account suspended. Personal Library actions are currently disabled.");
       return null;
     }
     if (!user) {
