@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import ProfilePanel from './ProfilePanel.jsx';
 import { getAvatarPresentation } from '../utils/profileAvatar.js';
 
-export default function AccountMenu({ supabase, user, profile, isAdmin, onAdmin, onSignOut, onProfileUpdated }) {
+export default function AccountMenu({ supabase, user, profile, isAdmin, libraryCounts, onAdmin, onSignOut, onProfileUpdated }) {
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState(null);
 
@@ -35,6 +35,6 @@ export default function AccountMenu({ supabase, user, profile, isAdmin, onAdmin,
         <button className="dropdown-signout" onClick={onSignOut}>Sign out</button>
       </div>}
     </div>
-    {panel && <ProfilePanel supabase={supabase} user={user} profile={profile} mode={panel} onClose={() => setPanel(null)} onProfileUpdated={onProfileUpdated} />}
+    {panel && <ProfilePanel supabase={supabase} user={user} profile={profile} mode={panel} libraryCounts={libraryCounts} onClose={() => setPanel(null)} onProfileUpdated={onProfileUpdated} />}
   </>;
 }

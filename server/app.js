@@ -8,6 +8,7 @@ import { searchCinemeta, getSeries, getMovie } from "./services/cinemeta.js";
 import { getSeasonSources, getMovieSources } from "./services/torrentio.js";
 import { explainSourceCandidates, geminiStatus, suggestSearchQueries } from "./services/gemini.js";
 import { requireUser, supabaseRequest, supabaseRpc } from "./services/supabaseAuth.js";
+import { createLibraryRouter } from "./routes/library.js";
 import { normalizeRankingPreference } from "../shared/rankingPreferences.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -130,12 +131,15 @@ app.post("/api/gemini/explain-source", rateLimitGemini, async (req, res) => {
   }
 });
 
+app.use("/api", createLibraryRouter());
+
 app.get("/api/cinemeta/search", async (req, res) => {
   const mediaType = req.query.type === undefined ? "series" : req.query.type;
   if (!["movie", "series"].includes(mediaType)) {
     return res.status(400).json({ error: "Media type must be movie or series." });
   }
   try {
+    res.setHeader("Cache-Control", "public, s-maxage=600, stale-while-revalidate=1800");
     return res.json({ results: await searchCinemeta(req.query.q, mediaType) });
   } catch (error) {
     console.error("Cinemeta search failed:", error.message);
@@ -146,6 +150,7 @@ app.get("/api/cinemeta/search", async (req, res) => {
 app.get("/api/cinemeta/movie/:id", async (req, res) => {
   if (!/^tt\d+$/.test(req.params.id)) return res.status(400).json({ error: "Invalid movie IMDb ID." });
   try {
+    res.setHeader("Cache-Control", "public, s-maxage=900, stale-while-revalidate=3600");
     return res.json(await getMovie(req.params.id));
   } catch (error) {
     console.error("Cinemeta movie metadata failed:", error.message);
@@ -156,6 +161,7 @@ app.get("/api/cinemeta/movie/:id", async (req, res) => {
 app.get("/api/cinemeta/series/:id", async (req, res) => {
   if (!/^tt\d+$/.test(req.params.id)) return res.status(400).json({ error: "Invalid series IMDb ID." });
   try {
+    res.setHeader("Cache-Control", "public, s-maxage=900, stale-while-revalidate=3600");
     return res.json(await getSeries(req.params.id));
   } catch (error) {
     console.error("Cinemeta metadata failed:", error.message);
