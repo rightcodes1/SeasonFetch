@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-export default function AuthPanel({ supabase, onClose, initialMode = 'sign-in' }) {
+export default function AuthPanel({ supabase, onClose, initialMode = 'sign-in', contextNote = '' }) {
   const [mode, setMode] = useState(initialMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -42,11 +42,15 @@ export default function AuthPanel({ supabase, onClose, initialMode = 'sign-in' }
           options: { data: { display_name: displayName.trim() } }
         });
         if (signUpError) throw signUpError;
-        setMessage(data.session ? 'Account created.' : 'Account created. Check your email to confirm it.');
+        if (data.session) {
+          onClose('authenticated');
+          return;
+        }
+        setMessage('Account created. Check your email to confirm it.');
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
         if (signInError) throw signInError;
-        onClose();
+        onClose('authenticated');
       }
     } catch (submitError) {
       setError(submitError.message || 'Authentication failed.');
@@ -61,7 +65,7 @@ export default function AuthPanel({ supabase, onClose, initialMode = 'sign-in' }
         <button className="account-close" onClick={onClose} aria-label="Close account panel">×</button>
         <span className="section-kicker">SEASONFETCH ACCOUNT</span>
         <h2 id="account-title">{isReset ? 'Choose a new password' : isRecovery ? 'Recover access' : isRegister ? 'Create your profile' : 'Welcome back'}</h2>
-        <p className="account-copy">{isReset ? 'Set a new password for your SeasonFetch account.' : isRecovery ? 'We’ll send a secure recovery link to your email.' : 'Optional accounts add profile features without changing public search or Torrentio access.'}</p>
+        <p className="account-copy">{isReset ? 'Set a new password for your SeasonFetch account.' : isRecovery ? 'We’ll send a secure recovery link to your email.' : contextNote || 'Sign in or create a free account to save movies and TV series, track statuses, and sync your library across devices.'}</p>
         <form className="account-form" onSubmit={submit}>
           {isRegister && <label>Display name<input value={displayName} onChange={event => setDisplayName(event.target.value)} autoComplete="name" /></label>}
           {!isReset && <label>Email<input type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" required /></label>}

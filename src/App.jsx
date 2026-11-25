@@ -1,11 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cinemeta } from './services/cinemeta.js';
 import { torrentio } from './services/torrentio.js';
 import AuthPanel from './components/AuthPanel.jsx';
 import AdminDashboard from './components/AdminDashboard.jsx';
-import AccountMenu from './components/AccountMenu.jsx';
-import { supabase } from './services/supabase.js';
+import AppHeader from './components/AppHeader.jsx';
+import LibraryView from './components/LibraryView.jsx';
+import PosterArt from './components/PosterArt.jsx';
+import SaveToLibraryControl from './components/SaveToLibraryControl.jsx';
+import { authConfigured, supabase } from './services/supabase.js';
 import ReleaseComparison from './components/ReleaseComparison.jsx';
+import { usePersonalLibrary } from './hooks/usePersonalLibrary.js';
+import { parseSectionFromPath, pushSectionPath } from './utils/navigation.js';
 import { getEpisodeReleaseFields, getReleaseIdentity, restoreEpisodeRecommendation, selectEpisodeRelease } from './utils/releaseSelection.js';
 import { copyTextToClipboard } from './utils/clipboard.js';
 import { signOutFromAuth } from './utils/accountActions.js';
@@ -169,15 +174,7 @@ function Icon({ name, size = 16, strokeWidth = 1.8 }) {
 }
 
 function Poster({ series, large = false }) {
-  return (
-    <div className={`poster-art ${series.accent} ${large ? 'poster-art-large' : ''}`} aria-label={`${series.title} poster artwork`}>
-      {series.poster && <img className="poster-image" src={series.poster} alt="" loading={large ? 'eager' : 'lazy'} onError={event => event.currentTarget.remove()} />}
-      <div className="poster-noise" />
-      <span className="poster-mark">{series.initials}</span>
-      <span className="poster-caption">{series.posterLabel}</span>
-      <span className="poster-edge">SEASONFETCH / 01</span>
-    </div>
-  );
+  return <PosterArt media={series} large={large} />;
 }
 
 function StatusBadge({ status }) {
@@ -206,7 +203,8 @@ function getEpisodeTitle(row, number) {
 }
 
 function App() {
-  const [query, setQuery] = useState('breaking bad');
+  const [activeSection, setActiveSection] = useState(() => parseSectionFromPath(window.location.pathname));
+  const [query, setQuery] = useState('');
   const [searchMode, setSearchMode] = useState('series');
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -267,6 +265,59 @@ function App() {
   const available = useMemo(() => episodes.filter(item => !['unavailable', 'provider-error'].includes(item.status)).length, [episodes]);
   const progress = episodes.length ? Math.round((available / episodes.length) * 100) : 0;
 
+  const toastTimerRef = useRef(null);
+  const showToastMessage = useCallback(message => {
+    setToast(message);
+    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast('');
+      toastTimerRef.current = null;
+    }, 2400);
+  }, []);
+
+  const openSignInPrompt = useCallback(() => {
+    if (supabase) {
+      setAuthMode('sign-in');
+      setShowAuth(true);
+    } else {
+      setNotice('Sign-in is unavailable because Supabase authentication is not configured for this deployment.');
+    }
+  }, []);
+
+  const library = usePersonalLibrary({
+    supabase,
+    user,
+    onRequireAuth: openSignInPrompt,
+    onToast: showToastMessage,
+    onNotice: setNotice
+  });
+
+  useEffect(() => {
+    function handlePopState() {
+      setActiveSection(parseSectionFromPath(window.location.pathname));
+    }
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  function navigateToSection(sectionId) {
+    setActiveSection(sectionId);
+    pushSectionPath(sectionId);
+    setNotice(null);
+  }
+
+  function openSavedTitle(item) {
+    if (!item) return;
+    navigateToSection('discover');
+    if (item.mediaType === 'movie') {
+      setSearchMode('movie');
+      chooseMovie(item);
+    } else {
+      setSearchMode('series');
+      chooseSeries(item);
+    }
+  }
+
   function invalidateScan() {
     scanCoordinatorRef.current.invalidate();
   }
@@ -296,7 +347,10 @@ function App() {
       && current.resolutionPreference === expected.resolutionPreference;
   }
 
-  useEffect(() => () => scanCoordinatorRef.current?.invalidate(), []);
+  useEffect(() => () => {
+    scanCoordinatorRef.current?.invalidate();
+    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (!supabase) return undefined;
@@ -946,6 +1000,7 @@ function App() {
     invalidateSuggestions();
     invalidateScan();
     metadataRequestRef.current += 1;
+    navigateToSection('discover');
     setQuery('');
     setResults([]);
     setSelected(null);
@@ -966,23 +1021,46 @@ function App() {
     <div className="app-shell">
       <div className="ambient ambient-one" />
       <div className="ambient ambient-two" />
-      <header className="topbar">
-        <button className="brand" onClick={reset} aria-label="Reset SeasonFetch">
-          <span className="brand-glyph"><span /></span>
-          <span>Season<span className="accent-text">Fetch</span></span>
-        </button>
-          <div className="topbar-right">
-          <span className="live-indicator"><i /> Live discovery</span>
-          <span className="topbar-label">{searchMode === 'movie' ? 'MOVIE SOURCE DISCOVERY' : 'TV SOURCE DISCOVERY'}</span>
-          {user ? <AccountMenu supabase={supabase} user={user} profile={profile} isAdmin={isAdmin} onAdmin={() => setShowAdmin(true)} onSignOut={signOut} onProfileUpdated={setProfile} /> : <button className="account-trigger account-sign-in" onClick={() => { if (supabase) setShowAuth(true); else setNotice('Sign-in is unavailable because Supabase authentication is not configured for this deployment.'); }}>Sign in</button>}
-        </div>
-      </header>
+      <AppHeader
+        activeSection={activeSection}
+        onNavigate={navigateToSection}
+        onResetBrand={reset}
+        libraryCount={library.counts.total}
+        libraryCounts={library.counts}
+        user={user}
+        supabase={supabase}
+        profile={profile}
+        isAdmin={isAdmin}
+        onAdmin={() => setShowAdmin(true)}
+        onSignOut={signOut}
+        onProfileUpdated={setProfile}
+        onSignIn={openSignInPrompt}
+      />
 
       <main>
+        {activeSection === 'library' ? (
+          <LibraryView
+            user={user}
+            authConfigured={authConfigured}
+            items={library.items}
+            counts={library.counts}
+            loading={library.loading}
+            error={library.error}
+            busyKeys={library.busyKeys}
+            onRetry={library.loadLibrary}
+            onOpenTitle={openSavedTitle}
+            onUpdateStatus={library.updateStatus}
+            onToggleFavorite={library.toggleFavorite}
+            onRemove={library.removeItem}
+            onGoDiscover={() => navigateToSection('discover')}
+            onRequestSignIn={openSignInPrompt}
+          />
+        ) : (
+        <>
         <section className="hero">
-          <div className="eyebrow"><span className="eyebrow-dot" /> {searchMode === 'movie' ? 'MOVIE SOURCE FINDER' : 'SEASON SOURCE FINDER'}</div>
-          <h1>{searchMode === 'movie' ? <>Find your movie.<br /><span>Compare every release.</span></> : <>Find your season.<br /><span>One episode at a time.</span></>}</h1>
-          <p className="hero-copy">{searchMode === 'movie' ? 'Discover and compare available releases for a single movie.' : <>Discover clean, high-quality sources for every episode.<br className="desktop-only" /></>} {rankingPreferenceDescription(torrentioPreference)}</p>
+          <div className="eyebrow"><span className="eyebrow-dot" /> {searchMode === 'movie' ? 'MOVIE DISCOVERY' : 'TV & MOVIE PLATFORM'}</div>
+          <h1>{searchMode === 'movie' ? <>Find your movie.<br /><span>Save &amp; compare releases.</span></> : <>Find your next watch.<br /><span>Save it to your library.</span></>}</h1>
+          <p className="hero-copy">{searchMode === 'movie' ? 'Discover films, build your watchlist, and compare available releases in one place.' : <>Discover TV series, save favorites to your personal library, and inspect episode sources.<br className="desktop-only" /></>} {rankingPreferenceDescription(torrentioPreference)}</p>
           <div className="search-mode" role="group" aria-label="Search type">
             <button type="button" aria-pressed={searchMode === 'series'} onClick={() => { if (searchMode === 'series') return; invalidateSearch(); invalidateSuggestions(); invalidateScan(); metadataRequestRef.current += 1; setSearchMode('series'); setSelected(null); setResults([]); setEpisodes([]); setMovieRelease(null); setMovieMetadataLoading(false); setNotice(null); setSearchTouched(false); }}>Series</button>
             <button type="button" aria-pressed={searchMode === 'movie'} onClick={() => { if (searchMode === 'movie') return; invalidateSearch(); invalidateSuggestions(); invalidateScan(); metadataRequestRef.current += 1; setSearchMode('movie'); setSelected(null); setResults([]); setEpisodes([]); setMovieRelease(null); setMovieMetadataLoading(false); setNotice(null); setSearchTouched(false); }}>Movies</button>
@@ -1014,11 +1092,24 @@ function App() {
           <section className="results-section fade-in">
             <div className="section-heading"><div><span className="section-kicker">SEARCH RESULTS</span><h2>{searchMode === 'movie' ? 'Matching movies' : 'Matching series'}</h2></div><span className="result-count">{results.length} matches</span></div>
             <div className="series-grid">
-              {results.map(series => <button key={series.id} className="series-card" onClick={() => searchMode === 'movie' ? chooseMovie(series) : chooseSeries(series)}>
-                <Poster series={series} />
-                <span className="series-card-copy"><strong>{series.title}</strong><span>{series.year || 'Year unavailable'} <i /> {series.type || 'Series'}</span><em><Icon name="bolt" size={11} /> {series.rating || 'Rating unavailable'}</em></span>
-                <span className="card-arrow"><Icon name="arrow" size={15} /></span>
-              </button>)}
+              {results.map(series => <div key={series.id} className="series-card-wrap">
+                <button className="series-card" onClick={() => searchMode === 'movie' ? chooseMovie(series) : chooseSeries(series)}>
+                  <Poster series={series} />
+                  <span className="series-card-copy"><strong>{series.title}</strong><span>{series.year || 'Year unavailable'} <i /> {series.type || 'Series'}</span><em><Icon name="bolt" size={11} /> {series.rating || 'Rating unavailable'}</em></span>
+                  <span className="card-arrow"><Icon name="arrow" size={15} /></span>
+                </button>
+                <SaveToLibraryControl
+                  variant="card"
+                  media={series}
+                  fallbackMediaType={searchMode}
+                  savedItem={library.getSavedItem(series, searchMode)}
+                  busy={library.isItemBusy(series, searchMode)}
+                  onSave={library.saveItem}
+                  onUpdateStatus={library.updateStatus}
+                  onToggleFavorite={library.toggleFavorite}
+                  onRemove={library.removeItem}
+                />
+              </div>)}
             </div>
           </section>
         )}
@@ -1043,6 +1134,17 @@ function App() {
                 <div className="selected-meta"><span>{selected.year || 'Year unavailable'}</span><i /> <span>{selected.type || (selected.mediaType === 'movie' ? 'Movie' : 'Series')}</span><i /> <span><Icon name="bolt" size={12} /> {selected.rating || 'Rating unavailable'}</span>{selected.mediaType === 'movie' && <><i /><span className="movie-id">IMDb {selected.imdbId}</span></>}</div>
                 <p className="synopsis">{selected.synopsis}</p>
                 <div className="genre-row">{(selected.genres || []).map(genre => <span key={genre}>{genre}</span>)}</div>
+                <SaveToLibraryControl
+                  variant="banner"
+                  media={selected}
+                  fallbackMediaType={selected.mediaType === 'movie' ? 'movie' : 'series'}
+                  savedItem={library.getSavedItem(selected, selected.mediaType === 'movie' ? 'movie' : 'series')}
+                  busy={library.isItemBusy(selected, selected.mediaType === 'movie' ? 'movie' : 'series')}
+                  onSave={library.saveItem}
+                  onUpdateStatus={library.updateStatus}
+                  onToggleFavorite={library.toggleFavorite}
+                  onRemove={library.removeItem}
+                />
               </div>
               <button className="change-button" onClick={() => { invalidateScan(); metadataRequestRef.current += 1; setSelected(null); setEpisodes([]); setMovieRelease(null); if (selected.mediaType === 'movie') runSearch(undefined, query); else setResults(SERIES); }}>{selected.mediaType === 'movie' ? 'Change movie' : 'Change series'} <Icon name="arrow" size={14} /></button>
             </div>
@@ -1132,11 +1234,13 @@ function App() {
             </div>}
           </section>
         )}
+        </>
+        )}
       </main>
 
       <footer className="footer"><div><span className="footer-mark">SF</span><span>SeasonFetch</span></div><span>Metadata: Cinemeta live <i /> Sources: Torrentio proxy <i /> {resolutionLabel}</span></footer>
       {toast && <div className="toast"><span className="toast-icon"><Icon name="check" size={14} /></span>{toast}</div>}
-      {showAuth && supabase && <AuthPanel key={authMode} supabase={supabase} initialMode={authMode} onClose={() => { setShowAuth(false); setAuthMode('sign-in'); }} />}
+      {showAuth && supabase && <AuthPanel key={authMode} supabase={supabase} initialMode={authMode} contextNote={library.pendingSave ? `Sign in or create a free account to save “${library.pendingSave.payload.title}” to your library.` : ''} onClose={reason => { setShowAuth(false); setAuthMode('sign-in'); if (reason !== 'authenticated') library.cancelPendingSave(); }} />}
       {showAdmin && isAdmin && <AdminDashboard supabase={supabase} onClose={() => setShowAdmin(false)} />}
     </div>
   );
